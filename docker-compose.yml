@@ -1,5 +1,8 @@
 services:
   drivevault:
+    # Images are built and published by .github/workflows/publish.yml on tag push (vX.Y.Z).
+    # Pin DRIVEVAULT_IMAGE_TAG to a released version for reproducible, rollback-able deploys —
+    # the :latest default below is convenient but not reproducible.
     image: ghcr.io/the-code-labz/drivevault-gateway:${DRIVEVAULT_IMAGE_TAG:-latest}
     pull_policy: always
     container_name: drivevault-gateway

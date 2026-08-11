@@ -31,7 +31,7 @@ if (config.nodeEnv === 'production') {
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
-  res.status(500).json({ error: 'Internal server error', message: err.message })
+  res.status(500).json({ error: 'Internal server error' })
 })
 
 app.listen(config.port, () => {

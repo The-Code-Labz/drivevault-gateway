@@ -86,7 +86,8 @@ router.get('/', async (_req: Request, res: Response) => {
     res.set('Content-Type', 'application/xml')
     res.send(buildListBucketsXml(buckets))
   } catch (err) {
-    res.status(500).json({ error: 'ListBuckets failed', message: (err as Error).message })
+    console.error('ListBuckets failed:', err)
+    res.status(500).json({ error: 'ListBuckets failed' })
   }
 })
 
@@ -99,7 +100,8 @@ router.get('/:bucket', async (req: Request, res: Response) => {
     res.set('Content-Type', 'application/xml')
     res.send(buildListObjectsXml(bucket, objects, prefixes, prefix))
   } catch (err) {
-    res.status(500).json({ error: 'ListObjects failed', message: (err as Error).message })
+    console.error('ListObjects failed:', err)
+    res.status(500).json({ error: 'ListObjects failed' })
   }
 })
 
@@ -117,6 +119,7 @@ router.head('/:bucket/:key(*)', async (req: Request, res: Response) => {
     res.set('Last-Modified', meta.lastModified || new Date().toISOString())
     res.status(200).end()
   } catch (err) {
+    console.error('HeadObject failed:', err)
     res.status(500).end()
   }
 })
@@ -138,7 +141,8 @@ router.get('/:bucket/:key(*)', async (req: Request, res: Response) => {
     }
     stream.pipe(res)
   } catch (err) {
-    res.status(500).json({ error: 'GetObject failed', message: (err as Error).message })
+    console.error('GetObject failed:', err)
+    res.status(500).json({ error: 'GetObject failed' })
   }
 })
 
@@ -154,7 +158,8 @@ router.put('/:bucket/:key(*)', async (req: Request, res: Response) => {
       Bucket: bucket,
     })
   } catch (err) {
-    res.status(500).json({ error: 'PutObject failed', message: (err as Error).message })
+    console.error('PutObject failed:', err)
+    res.status(500).json({ error: 'PutObject failed' })
   }
 })
 
@@ -168,7 +173,8 @@ router.delete('/:bucket/:key(*)', async (req: Request, res: Response) => {
     }
     res.status(204).end()
   } catch (err) {
-    res.status(500).json({ error: 'DeleteObject failed', message: (err as Error).message })
+    console.error('DeleteObject failed:', err)
+    res.status(500).json({ error: 'DeleteObject failed' })
   }
 })
 

@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.env
+.env.local
+**/.env
+**/.env.local
+service-account.json
+**/service-account.json
+data
+.git
+.github
+*.log
+.DS_Store
