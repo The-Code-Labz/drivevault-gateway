@@ -1,9 +1,14 @@
 import express from 'express'
 import cors from 'cors'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { config } from './config.js'
 import { requireApiKey, optionalApiKey } from './auth.js'
 import s3Router from './s3router.js'
 import webRouter from './webRouter.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const frontendDist = join(__dirname, '../../frontend/dist')
 
 const app = express()
 
@@ -18,9 +23,9 @@ app.use('/s3', requireApiKey, s3Router)
 
 // Web UI static files
 if (config.nodeEnv === 'production') {
-  app.use(express.static('../frontend/dist'))
+  app.use(express.static(frontendDist))
   app.get('*', (_req, res) => {
-    res.sendFile('index.html', { root: '../frontend/dist' })
+    res.sendFile('index.html', { root: frontendDist })
   })
 }
 
