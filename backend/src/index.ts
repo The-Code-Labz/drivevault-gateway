@@ -6,6 +6,7 @@ import { config } from './config.js'
 import { requireApiKey, optionalApiKey } from './auth.js'
 import s3Router from './s3router.js'
 import webRouter from './webRouter.js'
+import oauthRouter from './oauthRouter.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const frontendDist = join(__dirname, '../../frontend/dist')
@@ -13,6 +14,10 @@ const frontendDist = join(__dirname, '../../frontend/dist')
 const app = express()
 
 app.use(cors({ origin: config.corsOrigin }))
+
+// One-click Google OAuth login flow (browser redirects, no custom headers
+// possible — its own key check is query-param based, see oauthRouter.ts).
+app.use('/api/oauth', oauthRouter)
 
 // Public web API (read-only without key if configured)
 app.use('/api', express.json(), optionalApiKey, webRouter)

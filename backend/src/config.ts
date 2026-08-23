@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
+import { readStoredOAuthConfig } from './oauthStore.js'
 
 dotenv.config({ path: resolve(process.cwd(), '../.env') })
 dotenv.config({ path: resolve(process.cwd(), '.env') })
@@ -30,12 +31,25 @@ function loadJsonCredentials() {
 
 // OAuth user delegation (required for personal Gmail accounts — service
 // accounts have zero storage quota and Shared Drives don't exist outside
-// Google Workspace). If all three OAuth vars are present, uploads run as
-// the authorized human user against their own My Drive quota instead.
+// Google Workspace). Uploads then run as the authorized human user against
+// their own My Drive quota instead.
+//
+// The refresh token no longer has to be minted up front via a terminal
+// script: as long as GOOGLE_OAUTH_CLIENT_ID/SECRET are set (a "Web
+// application" OAuth client from Cloud Console — these never expire, safe
+// to keep in .env), the server can boot in OAuth mode with no refresh
+// token yet, and visiting /api/oauth/connect completes the browser login
+// and writes the refresh token to disk (./data/oauth-tokens.json) — no
+// restart needed. A refresh token already present in .env or the store
+// file is picked up automatically.
 const oauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID
 const oauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
-const oauthRefreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
-const useOAuth = !!(oauthClientId && oauthClientSecret && oauthRefreshToken)
+const storedOAuth = readStoredOAuthConfig()
+const oauthRefreshToken = storedOAuth?.refreshToken || process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+const useOAuth = !!(
+  (oauthClientId && oauthClientSecret) ||
+  (storedOAuth?.clientId && storedOAuth?.clientSecret)
+)
 
 export const config = {
   port: parseInt(process.env.PORT || '4050', 10),
@@ -46,7 +60,11 @@ export const config = {
     authMode: useOAuth ? ('oauth' as const) : ('service_account' as const),
     credentials: useOAuth ? undefined : loadJsonCredentials(),
     oauth: useOAuth
-      ? { clientId: oauthClientId!, clientSecret: oauthClientSecret!, refreshToken: oauthRefreshToken! }
+      ? {
+          clientId: (oauthClientId || storedOAuth?.clientId)!,
+          clientSecret: (oauthClientSecret || storedOAuth?.clientSecret)!,
+          refreshToken: oauthRefreshToken,
+        }
       : undefined,
     driveFolderId: (() => {
       const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 'root'
