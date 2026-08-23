@@ -37,8 +37,8 @@ Open http://localhost:4050.
 2. Create a service account: **IAM & Admin > Service Accounts > Create**.
 3. Generate a JSON key for the service account and download it.
 4. Enable the **Google Drive API**.
-5. (Optional) Create a shared Drive folder and share it with the service account email.
-6. Copy the folder ID from the URL (`https://drive.google.com/drive/folders/FOLDER_ID`) into `GOOGLE_DRIVE_ROOT_FOLDER_ID`.
+5. **Required:** create a [Google Shared Drive](https://support.google.com/a/answer/7212025) (not a regular folder) and add the service account's email as a **Content Manager**. Service accounts have zero storage quota of their own — a regular folder shared with the service account (even one it "owns") will let it create folders but every file upload will fail with `storageQuotaExceeded`. Only a real Shared Drive gives it quota, drawn from your Workspace org's pool.
+6. Copy the Shared Drive's top-level folder ID from the URL (`https://drive.google.com/drive/folders/FOLDER_ID`) into `GOOGLE_DRIVE_ROOT_FOLDER_ID`. Do not leave this as `root`.
 
 Put the service account JSON into `.env`:
 
@@ -135,7 +135,7 @@ docker compose up -d
 | `CORS_ORIGIN` | `*` | CORS origin |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | — | Service account JSON string |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | — | Path to service account JSON file |
-| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | `root` | Drive folder that holds buckets |
+| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | `root` | Shared Drive folder ID that holds buckets. Leaving this as `root` will cause every upload to fail with `storageQuotaExceeded` (service accounts have no My Drive quota) — set it to a real Shared Drive folder ID. |
 | `S3_ENDPOINT` | `http://localhost:4050` | Endpoint advertised to clients |
 | `S3_REGION` | `us-east-1` | S3 region string |
 

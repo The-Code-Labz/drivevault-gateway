@@ -34,7 +34,18 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || '*',
   google: {
     credentials: loadJsonCredentials(),
-    driveFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 'root',
+    driveFolderId: (() => {
+      const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || 'root'
+      if (id === 'root') {
+        console.warn(
+          'WARNING: GOOGLE_DRIVE_ROOT_FOLDER_ID is unset or "root". Service accounts have ' +
+            'no storage quota in their own My Drive — uploads WILL fail with storageQuotaExceeded. ' +
+            'Set GOOGLE_DRIVE_ROOT_FOLDER_ID to a folder ID inside a Shared Drive the service ' +
+            'account has been added to.'
+        )
+      }
+      return id
+    })(),
   },
   s3: {
     region: process.env.S3_REGION || 'us-east-1',
