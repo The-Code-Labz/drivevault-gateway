@@ -30,7 +30,7 @@ const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI
 const authUrl = oauth2Client.generateAuthUrl({
   access_type: 'offline',
   prompt: 'consent', // forces a refresh_token even on repeat runs
-  scope: ['https://www.googleapis.com/auth/drive'],
+  scope: ['https://www.googleapis.com/auth/drive.file'],
 })
 
 console.log('\n1. Open this URL in a browser logged into the Gmail account you want to use:\n')

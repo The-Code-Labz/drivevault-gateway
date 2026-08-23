@@ -26,7 +26,7 @@ if (!clientId || !clientSecret) {
 
 const DEVICE_CODE_URL = 'https://oauth2.googleapis.com/device/code'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
-const SCOPE = 'https://www.googleapis.com/auth/drive'
+const SCOPE = 'https://www.googleapis.com/auth/drive.file'
 
 async function main() {
   const deviceRes = await fetch(DEVICE_CODE_URL, {
