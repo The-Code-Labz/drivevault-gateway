@@ -294,7 +294,20 @@ class DriveAdapter {
     const bucketId = await this.ensureBucket(bucketName)
     const file = await this.findPath(bucketId, key)
     if (!file) return false
-    await this.drive.files.delete({ fileId: file.id!, supportsAllDrives: true })
+    // Use trash instead of a hard delete (files.delete). On a Shared Drive,
+    // files.delete permanently removes content and requires the caller to be
+    // an *organizer* (Manager role) on the parent — a role our service
+    // account setup docs never ask for (we only ask for Content Manager).
+    // Google surfaces that permission gap as a bare 404 "File not found"
+    // rather than 403, which made this look like a missing-file bug instead
+    // of a role restriction. Content Manager (and every other role that can
+    // write) is permitted to trash items, so this works across all three
+    // auth modes and is recoverable besides.
+    await this.drive.files.update({
+      fileId: file.id!,
+      requestBody: { trashed: true },
+      supportsAllDrives: true,
+    })
     return true
   }
 }
