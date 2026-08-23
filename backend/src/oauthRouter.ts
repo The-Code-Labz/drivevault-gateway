@@ -5,7 +5,18 @@ import { config } from './config.js'
 import { driveAdapter } from './drive.js'
 
 const router = Router()
-const SCOPE = ['https://www.googleapis.com/auth/drive']
+
+// drive.file (not the broad "drive" scope): Google classifies it as
+// non-sensitive, so publishing the OAuth consent screen Testing -> Production
+// needs no CASA verification review, and refresh tokens then never hit the
+// 7-day Testing-mode expiry. Trade-off: the app can only see files/folders it
+// creates itself via the API (or the user explicitly picks via Google
+// Picker) — a folder made by hand in the Drive UI and pointed at via
+// GOOGLE_DRIVE_ROOT_FOLDER_ID will be invisible. Leave that var unset/`root`
+// (the default) so every bucket the app creates lands under My Drive root and
+// stays visible. If you connected before this scope changed, hit
+// /api/oauth/connect again once to re-consent under the narrower scope.
+const SCOPE = ['https://www.googleapis.com/auth/drive.file']
 
 function checkKey(req: Request, res: Response): boolean {
   if (!config.apiKey) return true
@@ -100,9 +111,11 @@ router.get('/callback', async (req: Request, res: Response) => {
     }
     driveAdapter.setOAuthCredentials({ clientId, clientSecret, refreshToken: tokens.refresh_token })
     res.send(
-      '<h2>Connected</h2><p>DriveVault is now authorized against this Google account and will stay ' +
-        'authorized indefinitely (no periodic re-login needed) as long as the consent screen is in ' +
-        '<b>Production</b> mode, not Testing. You can close this tab.</p>'
+      '<h2>Connected</h2><p>DriveVault is now authorized against this Google account, scoped to only the ' +
+        'files/folders it creates itself (drive.file — a non-sensitive scope). Publish the OAuth consent ' +
+        'screen to <b>Production</b> in Cloud Console (no Google verification/CASA review required for this ' +
+        'scope) and the refresh token will stay valid indefinitely instead of expiring after 7 days in ' +
+        'Testing mode. You can close this tab.</p>'
     )
   } catch (err) {
     console.error('OAuth callback failed:', err)
