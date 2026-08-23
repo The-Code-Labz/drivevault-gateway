@@ -20,4 +20,9 @@ services:
       - S3_REGION=${S3_REGION:-us-east-1}
     volumes:
       - ./data:/app/data
+      # If using GOOGLE_SERVICE_ACCOUNT_JSON_PATH, drop the key file at
+      # ./data/service-account.json on the host (or edit the filename below).
+      # This mount forces it to land at that EXACT container path, even if the
+      # env var value doesn't happen to already live under /app/data.
+      - ./data/service-account.json:${GOOGLE_SERVICE_ACCOUNT_JSON_PATH:-/app/data/service-account.json}
     restart: unless-stopped
