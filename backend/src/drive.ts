@@ -1,6 +1,7 @@
 import { drive_v3, google } from 'googleapis'
 import { Readable } from 'stream'
 import { config } from './config.js'
+import { writeStoredOAuthConfig } from './oauthStore.js'
 
 export interface DriveObject {
   key: string
@@ -20,6 +21,7 @@ export interface DriveBucket {
 
 class DriveAdapter {
   private drive: drive_v3.Drive
+  private oauth2Client?: InstanceType<typeof google.auth.OAuth2>
 
   constructor() {
     if (config.google.authMode === 'oauth') {
@@ -27,10 +29,16 @@ class DriveAdapter {
       // one-time OAuth consent + refresh token) so uploads draw from that
       // user's own My Drive quota. Service accounts have none, and Shared
       // Drives / domain-wide delegation require a paid Workspace org.
+      //
+      // A refresh token isn't required at boot — the client id/secret alone
+      // are enough to start in OAuth mode; the refresh token can arrive
+      // later via the /api/oauth/connect browser flow (see oauthRouter.ts),
+      // which calls setOAuthCredentials() below to hot-swap it in without a
+      // restart.
       const { clientId, clientSecret, refreshToken } = config.google.oauth!
-      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret)
-      oauth2Client.setCredentials({ refresh_token: refreshToken })
-      this.drive = google.drive({ version: 'v3', auth: oauth2Client })
+      this.oauth2Client = new google.auth.OAuth2(clientId, clientSecret)
+      if (refreshToken) this.oauth2Client.setCredentials({ refresh_token: refreshToken })
+      this.drive = google.drive({ version: 'v3', auth: this.oauth2Client })
     } else {
       const auth = new google.auth.GoogleAuth({
         credentials: config.google.credentials,
@@ -38,6 +46,27 @@ class DriveAdapter {
       })
       this.drive = google.drive({ version: 'v3', auth })
     }
+  }
+
+  /** Whether a usable OAuth refresh token is currently loaded (vs. just client id/secret). */
+  hasOAuthCredentials(): boolean {
+    return !!this.oauth2Client?.credentials?.refresh_token
+  }
+
+  /**
+   * Hot-swaps the OAuth client/refresh token in place (no restart) and
+   * persists it to ./data/oauth-tokens.json so it survives container
+   * restarts. Called by the /api/oauth/callback route after a successful
+   * browser login.
+   */
+  setOAuthCredentials(creds: { clientId: string; clientSecret: string; refreshToken: string }): void {
+    if (config.google.authMode !== 'oauth') {
+      throw new Error('Cannot set OAuth credentials while running in service_account mode.')
+    }
+    this.oauth2Client = new google.auth.OAuth2(creds.clientId, creds.clientSecret)
+    this.oauth2Client.setCredentials({ refresh_token: creds.refreshToken })
+    this.drive = google.drive({ version: 'v3', auth: this.oauth2Client })
+    writeStoredOAuthConfig(creds)
   }
 
   private async rootFolderId(): Promise<string> {

@@ -18,6 +18,11 @@ services:
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
       - GOOGLE_OAUTH_REFRESH_TOKEN=${GOOGLE_OAUTH_REFRESH_TOKEN}
+      # Must exactly match the redirect URI registered on the OAuth client
+      # (<this>/api/oauth/callback). Visit /api/oauth/connect once in a
+      # browser to complete login — the refresh token is then written to
+      # ./data/oauth-tokens.json automatically, no restart needed.
+      - OAUTH_REDIRECT_BASE_URL=${OAUTH_REDIRECT_BASE_URL}
       - GOOGLE_DRIVE_ROOT_FOLDER_ID=${GOOGLE_DRIVE_ROOT_FOLDER_ID:-root}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://localhost:4050}
       - S3_REGION=${S3_REGION:-us-east-1}

@@ -68,37 +68,42 @@ see in the normal Drive UI. No Shared Drive, no Workspace subscription
 needed.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API** on your project (same as above — a personal Gmail account can still own a Cloud project for free).
-2. **APIs & Services > OAuth consent screen** — choose **External**, fill in the required fields, and add your own Gmail address as a **Test user**. (Test mode is fine indefinitely for personal use; no Google review needed.)
-3. **APIs & Services > Credentials > Create Credentials > OAuth client ID** — pick one of two application types depending on where you'll run the helper script in step 5:
-   - **Web application** (run the helper on the same machine as your browser) — under **Authorized redirect URIs**, add:
-     ```
-     http://localhost:53682/oauth2callback
-     ```
-   - **TVs and Limited Input devices** (run the helper headlessly — e.g. over SSH on the deploy server itself, with no browser or open port on that machine) — no redirect URI needed.
-4. Copy the generated **Client ID** and **Client secret**.
-5. Run the matching helper to mint a refresh token:
-   - Web application client, from a machine with a browser:
-     ```bash
-     cd backend
-     GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token
-     ```
-     Open the printed URL, log in with the Gmail account you want DriveVault to use, and approve access.
-   - TVs/Limited Input client, runnable anywhere (SSH, CI, the deploy host itself):
-     ```bash
-     cd backend
-     GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token:device
-     ```
-     It prints a short URL + code. Approve from *any* device (phone, laptop) — nothing needs to reach back to the machine running the script, so this is the one to use if you want an agent/automation to run it and paste the result straight into `.env` on the server.
-
-   Either script prints the three lines you need. It's a one-time run per Google account.
-6. Paste those into `.env`:
+2. **APIs & Services > OAuth consent screen** — choose **External**, fill in the required fields, and add your own Gmail address as a **Test user**.
+   - ⚠️ **Testing mode caps refresh tokens at 7 days** — they silently die and every Drive call starts failing with `invalid_grant` a week after you connect. Once you're happy it works, go back to **OAuth consent screen > Publish App** (Testing → In production). For a single-user personal tool, formal Google verification is not required — you'll just see a one-time "Google hasn't verified this app" click-through on the consent screen, which is normal and harmless. After publishing, the refresh token only expires if revoked, unused for 6 months, or your Google password changes — no periodic re-auth needed at all.
+3. **APIs & Services > Credentials > Create Credentials > OAuth client ID** — application type **Web application**. Under **Authorized redirect URIs**, add:
+   ```
+   https://your-drivevault-domain.example.com/api/oauth/callback
+   ```
+   (or `http://localhost:4050/api/oauth/callback` for local testing). This must match `OAUTH_REDIRECT_BASE_URL` below exactly.
+4. Copy the generated **Client ID** and **Client secret** into `.env`:
    ```bash
    GOOGLE_OAUTH_CLIENT_ID=...
    GOOGLE_OAUTH_CLIENT_SECRET=...
-   GOOGLE_OAUTH_REFRESH_TOKEN=...
+   OAUTH_REDIRECT_BASE_URL=https://your-drivevault-domain.example.com
    ```
-   Leave `GOOGLE_SERVICE_ACCOUNT_JSON`/`_PATH` blank — when OAuth vars are set they take priority and the service account path is skipped entirely.
-7. `GOOGLE_DRIVE_ROOT_FOLDER_ID` can now be any regular folder ID in your own Drive, or left blank/`root` to use your My Drive root directly — both work, since you have real quota.
+   Unlike the refresh token, these never expire on their own — safe to set once and leave in `.env`.
+5. `docker compose up -d` (or restart) so the server picks up the two vars and boots in OAuth mode.
+6. Open `http://<your-host>/api/oauth/connect` in a browser (append `?key=YOUR_API_KEY` if `API_KEY` is set). Log in with the Gmail account you want DriveVault to use and approve access. You're redirected straight back and the refresh token is written to `./data/oauth-tokens.json` automatically — **no copy-paste, no restart, no terminal.**
+7. `GOOGLE_DRIVE_ROOT_FOLDER_ID` can be any regular folder ID in your own Drive, or left blank/`root` to use your My Drive root directly — both work, since you have real quota.
+
+Check connection status anytime: `GET /api/oauth/status` → `{"authMode":"oauth","connected":true}`.
+
+**No terminal, only have client ID/secret?** `/api/oauth/connect` also accepts `?client_id=...&client_secret=...` directly on the URL (e.g. from a custom "Connect Google Drive" form in your own frontend) — those get round-tripped through Google's flow and don't need to be in `.env` at all first.
+
+<details>
+<summary>Fallback: terminal-based scripts (only needed if you can't reach the server on a browsable port at all)</summary>
+
+```bash
+cd backend
+# From a machine with a browser, redirect URI http://localhost:53682/oauth2callback:
+GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token
+# OR headless (SSH/CI), OAuth client type "TVs and Limited Input devices", no redirect URI:
+GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token:device
+```
+Both print `GOOGLE_OAUTH_REFRESH_TOKEN=...` to paste into `.env` manually. Same 7-day Testing-mode cap applies — publish the app to avoid it.
+</details>
+
+**Why there's no "auto-renew every 7 days" cron job:** the 7-day expiry only exists in Testing mode, and there is no way to script past it — Google's device/web OAuth flows both require an actual human to click "Allow" in a browser each time, by design (that's the whole security model). A cron job can't click that button, so "automate the renewal" really means "eliminate the need for renewal" — i.e. publish the app (step 2 above). Once published, the already-implemented `googleapis` client auto-refreshes the short-lived *access* token from the long-lived *refresh* token on every single API call — that part has always been automatic, no script needed.
 
 ---
 
@@ -183,9 +188,10 @@ docker compose up -d
 | `CORS_ORIGIN` | `*` | CORS origin |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | — | Mode 1 (Workspace): service account JSON string |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | — | Mode 1 (Workspace): path to service account JSON file |
-| `GOOGLE_OAUTH_CLIENT_ID` | — | Mode 2 (personal Gmail): OAuth client ID. Overrides Mode 1 when set with the two vars below. |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | Mode 2 (personal Gmail): OAuth client ID (Web application type). Setting this + the secret puts the server into OAuth mode, overriding Mode 1. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | — | Mode 2 (personal Gmail): OAuth client secret |
-| `GOOGLE_OAUTH_REFRESH_TOKEN` | — | Mode 2 (personal Gmail): refresh token, minted via `npm run oauth:token` |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | — | Mode 2 (personal Gmail): optional — normally obtained via the `/api/oauth/connect` browser flow instead (written to `./data/oauth-tokens.json`, not `.env`). Set this only if using the terminal fallback scripts. |
+| `OAUTH_REDIRECT_BASE_URL` | request host | Mode 2: public base URL DriveVault is reachable at, e.g. `https://drive.example.com`. Must exactly match the redirect URI registered on the OAuth client (`<this>/api/oauth/callback`). Falls back to the incoming request's own host if unset — fine for local testing, but set this explicitly behind a reverse proxy/CDN. |
 | `GOOGLE_DRIVE_ROOT_FOLDER_ID` | `root` | Folder that holds buckets. Mode 1: MUST be a real Shared Drive folder ID — leaving this as `root` fails every upload with `storageQuotaExceeded` (service accounts have no My Drive quota). Mode 2: any folder in your own Drive, or `root` for your My Drive root — both fine, since you have real quota. |
 | `S3_ENDPOINT` | `http://localhost:4050` | Endpoint advertised to clients |
 | `S3_REGION` | `us-east-1` | S3 region string |
