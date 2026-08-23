@@ -43,6 +43,8 @@ class DriveAdapter {
       q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
       fields: 'files(id, name, createdTime)',
       pageSize: 1000,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     })
     return (res.data.files || []).map((f) => ({
       name: f.name || '',
@@ -57,6 +59,8 @@ class DriveAdapter {
       q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(name)}' and trashed = false`,
       fields: 'files(id)',
       pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     })
     if (existing.data.files && existing.data.files.length > 0) {
       return existing.data.files[0].id!
@@ -68,6 +72,7 @@ class DriveAdapter {
         parents: [rootId],
       },
       fields: 'id',
+      supportsAllDrives: true,
     })
     return created.data.id!
   }
@@ -84,6 +89,8 @@ class DriveAdapter {
         q: query,
         fields: 'files(id, name, mimeType, size, modifiedTime, md5Checksum)',
         pageSize: 10,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       })
       const found = res.data.files?.find((f) =>
         isLast ? f.mimeType !== 'application/vnd.google-apps.folder' : f.mimeType === 'application/vnd.google-apps.folder'
@@ -95,6 +102,7 @@ class DriveAdapter {
     const res = await this.drive.files.get({
       fileId: parentId,
       fields: 'id, name, mimeType, size, modifiedTime, md5Checksum',
+      supportsAllDrives: true,
     })
     return res.data
   }
@@ -109,6 +117,8 @@ class DriveAdapter {
         q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(part)}' and trashed = false`,
         fields: 'files(id)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       })
       if (res.data.files && res.data.files.length > 0) {
         parentId = res.data.files[0].id!
@@ -120,6 +130,7 @@ class DriveAdapter {
             parents: [parentId],
           },
           fields: 'id',
+          supportsAllDrives: true,
         })
         parentId = created.data.id!
       }
@@ -137,6 +148,8 @@ class DriveAdapter {
         q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(part)}' and trashed = false`,
         fields: 'files(id)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       })
       if (!res.data.files || res.data.files.length === 0) {
         return { objects: [], prefixes: [] }
@@ -148,6 +161,8 @@ class DriveAdapter {
       q: `'${parentId}' in parents and trashed = false`,
       fields: 'files(id, name, mimeType, size, modifiedTime, md5Checksum)',
       pageSize: 1000,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     })
 
     const objects: DriveObject[] = []
@@ -195,7 +210,7 @@ class DriveAdapter {
     if (!file) return null
 
     const res = await this.drive.files.get(
-      { fileId: file.id!, alt: 'media' },
+      { fileId: file.id!, alt: 'media', supportsAllDrives: true },
       { responseType: 'stream' }
     )
 
@@ -222,6 +237,8 @@ class DriveAdapter {
       q: `'${parentId}' in parents and name = '${this.escapeName(fileName)}' and trashed = false`,
       fields: 'files(id)',
       pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     })
 
     let fileId: string
@@ -233,12 +250,14 @@ class DriveAdapter {
         fileId,
         media: { body: stream, mimeType: mime },
         fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+        supportsAllDrives: true,
       })
     } else {
       const created = await this.drive.files.create({
         requestBody: { name: fileName, parents: [parentId] },
         media: { body: stream, mimeType: mime },
         fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+        supportsAllDrives: true,
       })
       fileId = created.data.id!
     }
@@ -246,6 +265,7 @@ class DriveAdapter {
     const meta = await this.drive.files.get({
       fileId,
       fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+      supportsAllDrives: true,
     })
 
     return {
@@ -263,7 +283,7 @@ class DriveAdapter {
     const bucketId = await this.ensureBucket(bucketName)
     const file = await this.findPath(bucketId, key)
     if (!file) return false
-    await this.drive.files.delete({ fileId: file.id! })
+    await this.drive.files.delete({ fileId: file.id!, supportsAllDrives: true })
     return true
   }
 }
