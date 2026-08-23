@@ -22,11 +22,22 @@ class DriveAdapter {
   private drive: drive_v3.Drive
 
   constructor() {
-    const auth = new google.auth.GoogleAuth({
-      credentials: config.google.credentials,
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    })
-    this.drive = google.drive({ version: 'v3', auth })
+    if (config.google.authMode === 'oauth') {
+      // Personal Gmail accounts: authenticate as the actual human user (via a
+      // one-time OAuth consent + refresh token) so uploads draw from that
+      // user's own My Drive quota. Service accounts have none, and Shared
+      // Drives / domain-wide delegation require a paid Workspace org.
+      const { clientId, clientSecret, refreshToken } = config.google.oauth!
+      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret)
+      oauth2Client.setCredentials({ refresh_token: refreshToken })
+      this.drive = google.drive({ version: 'v3', auth: oauth2Client })
+    } else {
+      const auth = new google.auth.GoogleAuth({
+        credentials: config.google.credentials,
+        scopes: ['https://www.googleapis.com/auth/drive'],
+      })
+      this.drive = google.drive({ version: 'v3', auth })
+    }
   }
 
   private async rootFolderId(): Promise<string> {

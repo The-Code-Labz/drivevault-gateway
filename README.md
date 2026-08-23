@@ -33,11 +33,18 @@ Open http://localhost:4050.
 
 ## Google Drive setup
 
+DriveVault supports two auth modes. **Which one you need depends on whether
+your Google account is a paid Workspace org or a regular personal Gmail —
+Shared Drives (and the service-account mode below) do not exist on personal
+Gmail at all.**
+
+### Mode 1 — Service account (Google Workspace only)
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/).
 2. Create a service account: **IAM & Admin > Service Accounts > Create**.
 3. Generate a JSON key for the service account and download it.
 4. Enable the **Google Drive API**.
-5. **Required:** create a [Google Shared Drive](https://support.google.com/a/answer/7212025) (not a regular folder) and add the service account's email as a **Content Manager**. Service accounts have zero storage quota of their own — a regular folder shared with the service account (even one it "owns") will let it create folders but every file upload will fail with `storageQuotaExceeded`. Only a real Shared Drive gives it quota, drawn from your Workspace org's pool.
+5. **Required:** create a [Google Shared Drive](https://support.google.com/a/answer/7212025) (not a regular folder) and add the service account's email as a **Content Manager**. Service accounts have zero storage quota of their own — a regular folder shared with the service account (even one it "owns") will let it create folders but every file upload will fail with `storageQuotaExceeded`. Only a real Shared Drive gives it quota, drawn from your Workspace org's pool. **Shared Drives require a paid Google Workspace subscription — personal `@gmail.com` accounts cannot create them, so this mode is not usable there. Use Mode 2 instead.**
 6. Copy the Shared Drive's top-level folder ID from the URL (`https://drive.google.com/drive/folders/FOLDER_ID`) into `GOOGLE_DRIVE_ROOT_FOLDER_ID`. Do not leave this as `root`.
 
 Put the service account JSON into `.env`:
@@ -51,6 +58,36 @@ Or mount it as a file and set:
 ```bash
 GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/app/data/service-account.json
 ```
+
+### Mode 2 — OAuth user credentials (personal Gmail)
+
+For a regular personal Gmail account, skip the service account entirely.
+DriveVault instead authenticates as *you* (via a one-time OAuth consent),
+so uploads count against your own Drive storage quota — the same quota you
+see in the normal Drive UI. No Shared Drive, no Workspace subscription
+needed.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API** on your project (same as above — a personal Gmail account can still own a Cloud project for free).
+2. **APIs & Services > OAuth consent screen** — choose **External**, fill in the required fields, and add your own Gmail address as a **Test user**. (Test mode is fine indefinitely for personal use; no Google review needed.)
+3. **APIs & Services > Credentials > Create Credentials > OAuth client ID** — Application type **Web application**. Under **Authorized redirect URIs**, add:
+   ```
+   http://localhost:53682/oauth2callback
+   ```
+4. Copy the generated **Client ID** and **Client secret**.
+5. Run the included helper to mint a refresh token (do this once, on any machine with a browser — it doesn't need to be the server):
+   ```bash
+   cd backend
+   GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token
+   ```
+   Open the printed URL, log in with the Gmail account you want DriveVault to use, and approve access. The script prints the three lines you need.
+6. Paste those into `.env`:
+   ```bash
+   GOOGLE_OAUTH_CLIENT_ID=...
+   GOOGLE_OAUTH_CLIENT_SECRET=...
+   GOOGLE_OAUTH_REFRESH_TOKEN=...
+   ```
+   Leave `GOOGLE_SERVICE_ACCOUNT_JSON`/`_PATH` blank — when OAuth vars are set they take priority and the service account path is skipped entirely.
+7. `GOOGLE_DRIVE_ROOT_FOLDER_ID` can now be any regular folder ID in your own Drive, or left blank/`root` to use your My Drive root directly — both work, since you have real quota.
 
 ---
 
@@ -133,9 +170,12 @@ docker compose up -d
 | `PORT` | `4050` | HTTP port |
 | `API_KEY` | — | Optional API key for `/s3` and write endpoints |
 | `CORS_ORIGIN` | `*` | CORS origin |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | — | Service account JSON string |
-| `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | — | Path to service account JSON file |
-| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | `root` | Shared Drive folder ID that holds buckets. Leaving this as `root` will cause every upload to fail with `storageQuotaExceeded` (service accounts have no My Drive quota) — set it to a real Shared Drive folder ID. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | — | Mode 1 (Workspace): service account JSON string |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | — | Mode 1 (Workspace): path to service account JSON file |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | Mode 2 (personal Gmail): OAuth client ID. Overrides Mode 1 when set with the two vars below. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | — | Mode 2 (personal Gmail): OAuth client secret |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | — | Mode 2 (personal Gmail): refresh token, minted via `npm run oauth:token` |
+| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | `root` | Folder that holds buckets. Mode 1: MUST be a real Shared Drive folder ID — leaving this as `root` fails every upload with `storageQuotaExceeded` (service accounts have no My Drive quota). Mode 2: any folder in your own Drive, or `root` for your My Drive root — both fine, since you have real quota. |
 | `S3_ENDPOINT` | `http://localhost:4050` | Endpoint advertised to clients |
 | `S3_REGION` | `us-east-1` | S3 region string |
 
