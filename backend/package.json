@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "oauth:token": "node scripts/get-google-refresh-token.mjs"
+    "oauth:token": "node scripts/get-google-refresh-token.mjs",
+    "oauth:token:device": "node scripts/get-google-refresh-token-device.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

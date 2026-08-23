@@ -69,17 +69,28 @@ needed.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Google Drive API** on your project (same as above — a personal Gmail account can still own a Cloud project for free).
 2. **APIs & Services > OAuth consent screen** — choose **External**, fill in the required fields, and add your own Gmail address as a **Test user**. (Test mode is fine indefinitely for personal use; no Google review needed.)
-3. **APIs & Services > Credentials > Create Credentials > OAuth client ID** — Application type **Web application**. Under **Authorized redirect URIs**, add:
-   ```
-   http://localhost:53682/oauth2callback
-   ```
+3. **APIs & Services > Credentials > Create Credentials > OAuth client ID** — pick one of two application types depending on where you'll run the helper script in step 5:
+   - **Web application** (run the helper on the same machine as your browser) — under **Authorized redirect URIs**, add:
+     ```
+     http://localhost:53682/oauth2callback
+     ```
+   - **TVs and Limited Input devices** (run the helper headlessly — e.g. over SSH on the deploy server itself, with no browser or open port on that machine) — no redirect URI needed.
 4. Copy the generated **Client ID** and **Client secret**.
-5. Run the included helper to mint a refresh token (do this once, on any machine with a browser — it doesn't need to be the server):
-   ```bash
-   cd backend
-   GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token
-   ```
-   Open the printed URL, log in with the Gmail account you want DriveVault to use, and approve access. The script prints the three lines you need.
+5. Run the matching helper to mint a refresh token:
+   - Web application client, from a machine with a browser:
+     ```bash
+     cd backend
+     GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token
+     ```
+     Open the printed URL, log in with the Gmail account you want DriveVault to use, and approve access.
+   - TVs/Limited Input client, runnable anywhere (SSH, CI, the deploy host itself):
+     ```bash
+     cd backend
+     GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... npm run oauth:token:device
+     ```
+     It prints a short URL + code. Approve from *any* device (phone, laptop) — nothing needs to reach back to the machine running the script, so this is the one to use if you want an agent/automation to run it and paste the result straight into `.env` on the server.
+
+   Either script prints the three lines you need. It's a one-time run per Google account.
 6. Paste those into `.env`:
    ```bash
    GOOGLE_OAUTH_CLIENT_ID=...
