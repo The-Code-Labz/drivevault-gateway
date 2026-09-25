@@ -208,9 +208,15 @@ class DriveAdapter {
     const objects: DriveObject[] = []
     const prefixes = new Set<string>()
 
+    // S3 clients (rclone included) conventionally pass a trailing slash on
+    // `prefix` when listing a "directory" — naively appending another '/'
+    // here produced double-slash keys (e.g. "foo//bar.txt") on every such
+    // listing. Only insert the separator when prefix doesn't already end
+    // with one.
+    const prefixJoin = prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix
     for (const file of res.data.files || []) {
       const isFolder = file.mimeType === 'application/vnd.google-apps.folder'
-      const key = prefix ? `${prefix}/${file.name}` : file.name!
+      const key = prefixJoin ? `${prefixJoin}${file.name}` : file.name!
       if (isFolder) {
         prefixes.add(key + '/')
       } else {
