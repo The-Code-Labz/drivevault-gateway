@@ -1,8 +1,124 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { listBuckets, createBucket, listObjects, deleteObject, uploadObject, getObjectUrl } from './api'
-import type { Bucket, DriveObject } from './types'
-import { HardDrive, Folder, File, Trash2, Upload, RefreshCw, Plus, Download, ChevronRight } from 'lucide-react'
+import {
+  listBuckets,
+  createBucket,
+  listObjects,
+  deleteObject,
+  uploadObject,
+  getObjectUrl,
+  getApiKey,
+  setApiKey,
+  getOAuthStatus,
+  getOAuthConnectUrl,
+} from './api'
+import type { Bucket, DriveObject, OAuthStatus } from './types'
+import {
+  HardDrive,
+  Folder,
+  File,
+  Trash2,
+  Upload,
+  RefreshCw,
+  Plus,
+  Download,
+  ChevronRight,
+  KeyRound,
+  LogIn,
+  CheckCircle2,
+  XCircle,
+} from 'lucide-react'
+
+const OAUTH_POLL_MS = 5000
+
+function ApiKeyControl({ onChange }: { onChange: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(getApiKey())
+  const hasKey = !!getApiKey()
+
+  const save = () => {
+    setApiKey(value.trim())
+    setEditing(false)
+    onChange()
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => { setValue(getApiKey()); setEditing(true) }}
+        className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700"
+        title={hasKey ? 'API key is set — click to change' : 'No API key set — click to set one'}
+      >
+        <KeyRound size={16} className={hasKey ? 'text-green-500' : 'text-gray-500'} />
+        {hasKey ? 'API key set' : 'Set API key'}
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="password"
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="x-api-key"
+        className="w-48 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+      />
+      <button onClick={save} className="rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">Save</button>
+      <button onClick={() => setEditing(false)} className="rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700">Cancel</button>
+    </div>
+  )
+}
+
+function OAuthConnectControl() {
+  const [status, setStatus] = useState<OAuthStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const s = await getOAuthStatus()
+        if (!cancelled) setStatus(s)
+      } catch {
+        if (!cancelled) setStatus(null)
+      }
+    }
+    poll()
+    const id = setInterval(poll, OAUTH_POLL_MS)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  if (!status || status.authMode !== 'oauth') return null
+
+  const handleConnect = () => {
+    window.open(getOAuthConnectUrl(), '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {status.connected ? (
+        <span className="flex items-center gap-1 rounded bg-green-900/30 px-2 py-2 text-xs text-green-300">
+          <CheckCircle2 size={14} /> Google Drive connected
+        </span>
+      ) : (
+        <span className="flex items-center gap-1 rounded bg-red-900/30 px-2 py-2 text-xs text-red-300">
+          <XCircle size={14} /> Not connected
+        </span>
+      )}
+      <button
+        onClick={handleConnect}
+        className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500"
+      >
+        <LogIn size={16} /> {status.connected ? 'Reconnect' : 'Connect Google Drive'}
+      </button>
+    </div>
+  )
+}
 
 function formatBytes(n?: string) {
   const bytes = parseInt(n || '0', 10)
@@ -130,9 +246,13 @@ function Home() {
             <p className="text-sm text-gray-400">Google Drive exposed as S3-compatible object storage</p>
           </div>
         </div>
-        <button onClick={loadBuckets} className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 hover:bg-gray-700">
-          <RefreshCw size={16} /> Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <OAuthConnectControl />
+          <ApiKeyControl onChange={loadBuckets} />
+          <button onClick={loadBuckets} className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 hover:bg-gray-700">
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
       </header>
 
       {error && (

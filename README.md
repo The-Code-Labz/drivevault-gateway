@@ -11,7 +11,7 @@ DriveVault Gateway is a self-hosted web app that sits between your applications 
 - **Buckets** = top-level folders inside a Google Drive root folder.
 - **Objects** = files inside those folders, with slash-separated keys (`folder/subfolder/file.txt`).
 - **S3-compatible API** at `/s3` — works with curl, AWS SDK, boto3, rclone, Cyberduck, etc.
-- **Web UI** at `/` for browsing buckets, uploading, downloading, and deleting.
+- **Web UI** at `/` for browsing buckets, uploading, downloading, and deleting. If `API_KEY` is set, click **"Set API key"** in the header and paste it once — it's stored in the browser's `localStorage`, not baked into the build, so you never need a `?key=...` query param or a `VITE_API_KEY` rebuild. The **"Connect Google Drive"** button (Mode 2 / OAuth deployments only) opens the consent flow in a new tab and the header polls `/api/oauth/status` every few seconds to show live connected/disconnected state.
 
 ---
 
