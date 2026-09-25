@@ -166,17 +166,28 @@ router.put('/:bucket/:key(*)', async (req: Request, res: Response) => {
   const copySourceHeader = req.headers['x-amz-copy-source']
   if (copySourceHeader) {
     const copySource = Array.isArray(copySourceHeader) ? copySourceHeader[0] : copySourceHeader
+    let decoded: string
     try {
-      const decoded = decodeURIComponent(copySource).replace(/^\/+/, '')
-      const slash = decoded.indexOf('/')
-      if (slash === -1) {
-        return res.status(400).json({
-          error: 'InvalidArgument',
-          message: 'x-amz-copy-source must be in the form /bucket/key',
-        })
-      }
-      const srcBucket = decoded.slice(0, slash)
-      const srcKey = decoded.slice(slash + 1)
+      decoded = decodeURIComponent(copySource).replace(/^\/+/, '')
+    } catch {
+      return res.status(400).json({
+        error: 'InvalidArgument',
+        message: 'x-amz-copy-source is not validly URI-encoded',
+      })
+    }
+    // Strip a ?versionId=... suffix — this gateway has no object versioning,
+    // so the source is identified by bucket/key alone.
+    decoded = decoded.split('?')[0]
+    const slash = decoded.indexOf('/')
+    const srcBucket = slash === -1 ? '' : decoded.slice(0, slash)
+    const srcKey = slash === -1 ? '' : decoded.slice(slash + 1)
+    if (!srcBucket || !srcKey) {
+      return res.status(400).json({
+        error: 'InvalidArgument',
+        message: 'x-amz-copy-source must be in the form /bucket/key',
+      })
+    }
+    try {
       const meta = await driveAdapter.copyObject(srcBucket, srcKey, bucket, key)
       res.set('Content-Type', 'application/xml')
       // CopyObjectResult is XML per spec, unlike PutObject's response below —
