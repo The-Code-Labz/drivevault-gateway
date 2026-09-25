@@ -319,6 +319,70 @@ class DriveAdapter {
     }
   }
 
+  async copyObject(srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<DriveObject> {
+    const srcBucketId = await this.ensureBucket(srcBucket)
+    const srcFile = await this.findPath(srcBucketId, srcKey)
+    if (!srcFile) throw new Error('NoSuchKey')
+
+    const destBucketId = await this.ensureBucket(destBucket)
+    const destParentId = await this.findOrCreateFolderPath(destBucketId, destKey)
+    const destName = destKey.split('/').pop()!
+
+    // Drive's files.copy is a true server-side operation — no bytes leave
+    // Drive, unlike a naive GET-then-PUT. NOTE: unlike putObject (which does
+    // an in-place files.update on an existing file, keeping the same Drive
+    // id), this always mints a brand-new Drive id for the destination and
+    // trashes whatever occupied that key before — a real semantic
+    // divergence from putObject's overwrite path. Harmless for rclone
+    // (which addresses objects by key, not Drive id) but worth knowing if
+    // anything elsewhere keys off Drive file id. Copy first, then clean up
+    // stale duplicates, so a self-copy touch never leaves a window with
+    // zero live copies of the file if the copy step fails.
+    const copied = await this.drive.files.copy({
+      fileId: srcFile.id!,
+      requestBody: { name: destName, parents: [destParentId] },
+      fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+      supportsAllDrives: true,
+    })
+
+    // List AFTER the copy (not before) and trash every match except the one
+    // we just created. This both (a) cleans up more than one stale
+    // duplicate if they've accumulated, and (b) self-heals a race between
+    // two concurrent self-copy touches on the same key: whichever request's
+    // cleanup runs last sees both new files and trashes all but its own,
+    // converging to a single live copy instead of leaking an orphan.
+    const existing = await this.drive.files.list({
+      q: `'${destParentId}' in parents and name = '${this.escapeName(destName)}' and trashed = false`,
+      fields: 'files(id)',
+      pageSize: 50,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    })
+    const staleIds = (existing.data.files || [])
+      .map((f) => f.id)
+      .filter((id): id is string => !!id && id !== copied.data.id)
+    // Mirrors deleteObject's trash convention rather than a hard delete.
+    await Promise.all(
+      staleIds.map((id) =>
+        this.drive.files.update({
+          fileId: id,
+          requestBody: { trashed: true },
+          supportsAllDrives: true,
+        })
+      )
+    )
+
+    return {
+      key: destKey,
+      name: copied.data.name!,
+      size: copied.data.size || '0',
+      lastModified: copied.data.modifiedTime || undefined,
+      etag: copied.data.md5Checksum || copied.data.id!,
+      contentType: copied.data.mimeType || 'application/octet-stream',
+      isFolder: false,
+    }
+  }
+
   async deleteObject(bucketName: string, key: string): Promise<boolean> {
     const bucketId = await this.ensureBucket(bucketName)
     const file = await this.findPath(bucketId, key)
