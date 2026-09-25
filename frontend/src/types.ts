@@ -18,3 +18,8 @@ export interface ListObjectsResult {
   objects: DriveObject[]
   prefixes: string[]
 }
+
+export interface OAuthStatus {
+  authMode: string
+  connected: boolean
+}
