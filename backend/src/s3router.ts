@@ -156,9 +156,47 @@ router.get('/:bucket/:key(*)', async (req: Request, res: Response) => {
   }
 })
 
-// PUT /{bucket}/{key} — PutObject
+// PUT /{bucket}/{key} — PutObject, or CopyObject when x-amz-copy-source is set.
+// rclone issues a same-key server-side copy (no request body) to refresh
+// metadata on a no-op resync instead of re-uploading unchanged bytes; without
+// this branch that request fell through to putObject and tried to write an
+// empty body over the real file.
 router.put('/:bucket/:key(*)', async (req: Request, res: Response) => {
   const { bucket, key } = parseBucketKey(req)
+  const copySourceHeader = req.headers['x-amz-copy-source']
+  if (copySourceHeader) {
+    const copySource = Array.isArray(copySourceHeader) ? copySourceHeader[0] : copySourceHeader
+    try {
+      const decoded = decodeURIComponent(copySource).replace(/^\/+/, '')
+      const slash = decoded.indexOf('/')
+      if (slash === -1) {
+        return res.status(400).json({
+          error: 'InvalidArgument',
+          message: 'x-amz-copy-source must be in the form /bucket/key',
+        })
+      }
+      const srcBucket = decoded.slice(0, slash)
+      const srcKey = decoded.slice(slash + 1)
+      const meta = await driveAdapter.copyObject(srcBucket, srcKey, bucket, key)
+      res.set('Content-Type', 'application/xml')
+      // CopyObjectResult is XML per spec, unlike PutObject's response below —
+      // the AWS SDK/rclone parse this body as XML and will fail the request
+      // if it isn't.
+      res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<CopyObjectResult>
+  <LastModified>${meta.lastModified || new Date().toISOString()}</LastModified>
+  <ETag>"${xmlEscape(meta.etag || '')}"</ETag>
+</CopyObjectResult>`)
+    } catch (err) {
+      console.error('CopyObject failed:', err)
+      if (err instanceof Error && err.message === 'NoSuchKey') {
+        return res.status(404).json({ error: 'NoSuchKey', message: `Source object not found: ${copySource}` })
+      }
+      res.status(500).json({ error: 'CopyObject failed' })
+    }
+    return
+  }
+
   try {
     const meta = await driveAdapter.putObject(bucket, key, req, req.headers['content-type'])
     res.set('ETag', `"${meta.etag}"`)
