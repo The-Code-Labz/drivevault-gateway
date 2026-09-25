@@ -4,6 +4,15 @@ import type { Request, Response } from 'express'
 
 const router = Router()
 
+// HTTP headers (Last-Modified, Date, etc.) require RFC 1123 format
+// ("Mon, 02 Jan 2006 15:04:05 GMT"), not raw ISO-8601. The AWS SDK/rclone
+// parse this header strictly and fail the whole request if it doesn't match,
+// even though the same timestamp inside the XML body is correctly ISO-8601.
+function toHttpDate(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date()
+  return (isNaN(d.getTime()) ? new Date() : d).toUTCString()
+}
+
 function xmlEscape(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -116,7 +125,7 @@ router.head('/:bucket/:key(*)', async (req: Request, res: Response) => {
     res.set('Content-Length', meta.size || '0')
     res.set('Content-Type', meta.contentType || 'application/octet-stream')
     res.set('ETag', `"${meta.etag}"`)
-    res.set('Last-Modified', meta.lastModified || new Date().toISOString())
+    res.set('Last-Modified', toHttpDate(meta.lastModified))
     res.status(200).end()
   } catch (err) {
     console.error('HeadObject failed:', err)
@@ -136,6 +145,7 @@ router.get('/:bucket/:key(*)', async (req: Request, res: Response) => {
     res.set('Content-Type', meta.contentType || 'application/octet-stream')
     res.set('Content-Length', meta.size || '0')
     res.set('ETag', `"${meta.etag}"`)
+    res.set('Last-Modified', toHttpDate(meta.lastModified))
     if (req.query.download === 'true') {
       res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(meta.name)}"`)
     }
