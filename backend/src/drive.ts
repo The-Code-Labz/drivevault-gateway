@@ -141,10 +141,68 @@ class DriveAdapter {
 
     const res = await this.drive.files.get({
       fileId: parentId,
-      fields: 'id, name, mimeType, size, modifiedTime, md5Checksum',
+      fields: 'id, name, mimeType, size, modifiedTime, md5Checksum, parents',
       supportsAllDrives: true,
     })
     return res.data
+  }
+
+  /** Resolves a key to a folder's Drive id (not a file). Returns null if any
+   * path segment is missing, or the key is empty (bucket root isn't a
+   * deletable "object"). */
+  private async findFolder(bucketId: string, key: string): Promise<string | null> {
+    const parts = key.split('/').filter(Boolean)
+    if (parts.length === 0) return null
+    let parentId = bucketId
+    for (const part of parts) {
+      const res = await this.drive.files.list({
+        q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(part)}' and trashed = false`,
+        fields: 'files(id)',
+        pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      })
+      if (!res.data.files || res.data.files.length === 0) return null
+      parentId = res.data.files[0].id!
+    }
+    return parentId
+  }
+
+  private async folderHasChildren(folderId: string): Promise<boolean> {
+    const res = await this.drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: 'files(id)',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    })
+    return !!(res.data.files && res.data.files.length > 0)
+  }
+
+  /** Walks up from `startFolderId`, trashing every now-empty folder, and
+   * stops at `bucketId` (the bucket root is never trashed here). Called
+   * after deleting the last file in a folder so DriveVault doesn't leak
+   * permanently empty folders — unlike true S3, a Drive folder is a real
+   * object that outlives every file that was ever inside it. */
+  private async trashEmptyAncestors(bucketId: string, startFolderId: string): Promise<void> {
+    let folderId: string | undefined = startFolderId
+    let guard = 0
+    while (folderId && folderId !== bucketId && guard < 50) {
+      guard++
+      if (await this.folderHasChildren(folderId)) break
+      const info: { data: drive_v3.Schema$File } = await this.drive.files.get({
+        fileId: folderId,
+        fields: 'parents',
+        supportsAllDrives: true,
+      })
+      const nextParent: string | undefined = info.data.parents?.[0] ?? undefined
+      await this.drive.files.update({
+        fileId: folderId,
+        requestBody: { trashed: true },
+        supportsAllDrives: true,
+      })
+      folderId = nextParent
+    }
   }
 
   private async findOrCreateFolderPath(bucketId: string, key: string): Promise<string> {
@@ -391,6 +449,28 @@ class DriveAdapter {
 
   async deleteObject(bucketName: string, key: string): Promise<boolean> {
     const bucketId = await this.ensureBucket(bucketName)
+
+    // A trailing slash is the S3 convention for addressing a "directory" —
+    // rclone's generic S3 backend never actually sends this (Rmdir is a
+    // no-op there once a prefix lists empty), but DriveVault's folders are
+    // real, persistent Drive objects, not synthesized listing prefixes, so
+    // give callers (or a client with directory_markers-style behavior) an
+    // explicit route to remove one once it's empty. Refuses (rather than
+    // silently trashing) a folder that still has live children.
+    if (key.endsWith('/')) {
+      const folderId = await this.findFolder(bucketId, key)
+      if (!folderId) return false
+      if (await this.folderHasChildren(folderId)) {
+        throw new Error('DirectoryNotEmpty')
+      }
+      await this.drive.files.update({
+        fileId: folderId,
+        requestBody: { trashed: true },
+        supportsAllDrives: true,
+      })
+      return true
+    }
+
     const file = await this.findPath(bucketId, key)
     if (!file) return false
     // Use trash instead of a hard delete (files.delete). On a Shared Drive,
@@ -407,6 +487,14 @@ class DriveAdapter {
       requestBody: { trashed: true },
       supportsAllDrives: true,
     })
+
+    // Auto-clean now-empty ancestor folders with the same trash convention —
+    // deleting the last file in a folder shouldn't leave that folder (and
+    // any now-empty parents above it) behind forever, since nothing else in
+    // this gateway ever cleans them up.
+    const parentId = file.parents?.[0]
+    if (parentId) await this.trashEmptyAncestors(bucketId, parentId)
+
     return true
   }
 }

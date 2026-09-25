@@ -232,6 +232,9 @@ router.delete('/:bucket/:key(*)', async (req: Request, res: Response) => {
     }
     res.status(204).end()
   } catch (err) {
+    if (err instanceof Error && err.message === 'DirectoryNotEmpty') {
+      return res.status(409).json({ error: 'DirectoryNotEmpty', message: `Folder not empty: ${key}` })
+    }
     console.error('DeleteObject failed:', err)
     res.status(500).json({ error: 'DeleteObject failed' })
   }
