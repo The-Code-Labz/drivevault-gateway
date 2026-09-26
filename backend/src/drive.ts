@@ -291,11 +291,27 @@ class DriveAdapter {
    * to the bucket root. Used for delimiter-less (flat/recursive) listings —
    * the S3 default when a client omits `delimiter` entirely, which is what
    * `rclone lsjson -R` / `rclone check` / `aws s3 ls --recursive` send. */
+  /** `depth` mirrors the same defensive pattern as `trashEmptyAncestors`'
+   * `guard > 50` cap: a real folder cycle shouldn't be reachable (Drive
+   * rejects reparenting a folder into its own descendant, and shortcuts
+   * aren't dereferenced as folders here — only exact FOLDER_MIME is
+   * recursed), but relying on "no cycle possible today" across future Drive
+   * API behavior is fragile, and an unbounded tree still means unbounded
+   * sequential API calls on one request either way. Logs and truncates
+   * rather than throwing, so a legitimately deep tree still returns
+   * everything up to the cap instead of failing the whole listing. */
   private async collectObjectsRecursive(
     folderId: string,
     keyPrefix: string,
-    out: DriveObject[]
+    out: DriveObject[],
+    depth = 0
   ): Promise<void> {
+    if (depth > 50) {
+      console.warn(
+        `collectObjectsRecursive: depth guard (50) hit under prefix "${keyPrefix}"; truncating listing without descending further`
+      )
+      return
+    }
     const files = await this.listLiveChildren(
       folderId,
       'files(id, name, mimeType, size, modifiedTime, md5Checksum)',
@@ -304,7 +320,7 @@ class DriveAdapter {
     for (const file of files) {
       const key = keyPrefix ? `${keyPrefix}${file.name}` : file.name!
       if (file.mimeType === FOLDER_MIME) {
-        await this.collectObjectsRecursive(file.id!, `${key}/`, out)
+        await this.collectObjectsRecursive(file.id!, `${key}/`, out, depth + 1)
       } else {
         out.push({
           key,
@@ -352,6 +368,17 @@ class DriveAdapter {
     const prefixJoin = prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix
 
     if (delimiter !== '/') {
+      // S3 permits grouping on any delimiter character, not just '/'. Real
+      // clients (rclone, aws-cli) only ever send '/' or omit the param
+      // entirely, so a non-'/' value silently falls back to a fully
+      // recursive listing rather than grouping on that character — a
+      // deliberate simplification, not an oversight. Logged so a future
+      // client sending something else doesn't get a silently-wrong answer.
+      if (delimiter) {
+        console.warn(
+          `listObjects: delimiter "${delimiter}" is not '/'; returning a flat recursive listing instead of grouping on it`
+        )
+      }
       const objects: DriveObject[] = []
       await this.collectObjectsRecursive(parentId, prefixJoin, objects)
       return { objects, prefixes: [] }
