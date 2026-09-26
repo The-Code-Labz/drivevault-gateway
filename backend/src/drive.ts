@@ -21,9 +21,62 @@ export interface DriveBucket {
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
+/** A just-written Drive node (file or folder), cached to bridge Drive's own
+ * read-after-write lag: `files.create`/`files.update` return immediately,
+ * but a same-process `files.list` query for that exact node (by parent+name)
+ * can still miss it for a short window afterward — `files.get`-by-id is
+ * consistent, `files.list`-by-query isn't. Observed live: a fresh multi-
+ * level `sync` into a brand-new nested path failed its first attempt with
+ * "object not found" and self-healed on rclone's automatic retry a moment
+ * later — exactly this window, and it can hit either an intermediate folder
+ * segment or the leaf file itself. */
+interface CachedNode {
+  id: string
+  mimeType: string
+  expiresAt: number
+}
+
 class DriveAdapter {
   private drive: drive_v3.Drive
   private oauth2Client?: InstanceType<typeof google.auth.OAuth2>
+
+  // Keyed by `${parentId}::${name}`. Populated exclusively right after a
+  // files.list hit or a files.create/files.update call, so an entry here is
+  // always known-good at insert time. Short TTL bounds staleness if the tree
+  // ever changes by some path other than this adapter (there isn't one
+  // today, but the TTL costs nothing and removes the need to prove that will
+  // stay true). Entries are evicted immediately on trash/delete (see
+  // cacheEvictById) so a removed node is never handed back from cache as
+  // still-live.
+  private nodeCache = new Map<string, CachedNode>()
+  private static readonly NODE_CACHE_TTL_MS = 10_000
+
+  private cacheGet(parentId: string, name: string): CachedNode | undefined {
+    const key = `${parentId}::${name}`
+    const hit = this.nodeCache.get(key)
+    if (!hit) return undefined
+    if (hit.expiresAt < Date.now()) {
+      this.nodeCache.delete(key)
+      return undefined
+    }
+    return hit
+  }
+
+  private cachePut(parentId: string, name: string, id: string, mimeType: string): void {
+    this.nodeCache.set(`${parentId}::${name}`, {
+      id,
+      mimeType,
+      expiresAt: Date.now() + DriveAdapter.NODE_CACHE_TTL_MS,
+    })
+  }
+
+  /** Evicts every cache entry pointing at `id` — called when that node is
+   * trashed/deleted, so a lookup racing the removal can't hand back a dead id. */
+  private cacheEvictById(id: string): void {
+    for (const [key, value] of this.nodeCache) {
+      if (value.id === id) this.nodeCache.delete(key)
+    }
+  }
 
   constructor() {
     if (config.google.authMode === 'oauth') {
@@ -97,6 +150,8 @@ class DriveAdapter {
 
   async ensureBucket(name: string): Promise<string> {
     const rootId = await this.rootFolderId()
+    const cached = this.cacheGet(rootId, name)
+    if (cached && cached.mimeType === FOLDER_MIME) return cached.id
     const existing = await this.drive.files.list({
       q: `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(name)}' and trashed = false`,
       fields: 'files(id)',
@@ -105,7 +160,9 @@ class DriveAdapter {
       includeItemsFromAllDrives: true,
     })
     if (existing.data.files && existing.data.files.length > 0) {
-      return existing.data.files[0].id!
+      const id = existing.data.files[0].id!
+      this.cachePut(rootId, name, id, FOLDER_MIME)
+      return id
     }
     const created = await this.drive.files.create({
       requestBody: {
@@ -116,7 +173,9 @@ class DriveAdapter {
       fields: 'id',
       supportsAllDrives: true,
     })
-    return created.data.id!
+    const id = created.data.id!
+    this.cachePut(rootId, name, id, FOLDER_MIME)
+    return id
   }
 
   /** Walks a split path from `bucketId`, one segment per Drive `files.list`
@@ -140,6 +199,17 @@ class DriveAdapter {
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
       const isLast = i === parts.length - 1
+      const matchesConstraint = (mimeType: string) => {
+        if (!isLast) return mimeType === FOLDER_MIME
+        if (leafMode === 'file') return mimeType !== FOLDER_MIME
+        if (leafMode === 'folder') return mimeType === FOLDER_MIME
+        return true
+      }
+      const cached = this.cacheGet(parentId, part)
+      if (cached && matchesConstraint(cached.mimeType)) {
+        parentId = cached.id
+        continue
+      }
       const res = await this.drive.files.list({
         q: `'${parentId}' in parents and name = '${this.escapeName(part)}' and trashed = false`,
         fields: 'files(id, name, mimeType, size, modifiedTime, md5Checksum)',
@@ -147,13 +217,9 @@ class DriveAdapter {
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       })
-      const found = res.data.files?.find((f) => {
-        if (!isLast) return f.mimeType === FOLDER_MIME
-        if (leafMode === 'file') return f.mimeType !== FOLDER_MIME
-        if (leafMode === 'folder') return f.mimeType === FOLDER_MIME
-        return true
-      })
+      const found = res.data.files?.find((f) => matchesConstraint(f.mimeType || ''))
       if (!found) return null
+      this.cachePut(parentId, part, found.id!, found.mimeType || '')
       parentId = found.id!
     }
     return parentId
@@ -243,6 +309,11 @@ class DriveAdapter {
         requestBody: { trashed: true },
         supportsAllDrives: true,
       })
+      // Evict immediately, before the un-trash-if-repopulated check below —
+      // a stale cache entry surviving this call could hand a racing request
+      // a dead folder id even if we roll the trash back a moment later; the
+      // next lookup will just re-query and re-cache correctly regardless.
+      this.cacheEvictById(folderId)
       if (await this.folderHasChildren(folderId)) {
         await this.drive.files.update({
           fileId: folderId,
@@ -261,6 +332,11 @@ class DriveAdapter {
     let parentId = bucketId
 
     for (const part of folderParts) {
+      const cached = this.cacheGet(parentId, part)
+      if (cached && cached.mimeType === FOLDER_MIME) {
+        parentId = cached.id
+        continue
+      }
       const res = await this.drive.files.list({
         q: `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${this.escapeName(part)}' and trashed = false`,
         fields: 'files(id)',
@@ -269,7 +345,9 @@ class DriveAdapter {
         includeItemsFromAllDrives: true,
       })
       if (res.data.files && res.data.files.length > 0) {
-        parentId = res.data.files[0].id!
+        const id = res.data.files[0].id!
+        this.cachePut(parentId, part, id, FOLDER_MIME)
+        parentId = id
       } else {
         const created = await this.drive.files.create({
           requestBody: {
@@ -280,7 +358,15 @@ class DriveAdapter {
           fields: 'id',
           supportsAllDrives: true,
         })
-        parentId = created.data.id!
+        const id = created.data.id!
+        // This is THE fix for the observed race: the very next request in
+        // the same process (e.g. rclone's post-upload HeadObject) walks this
+        // exact path via walkPath's files.list query. Caching the id we just
+        // got back from files.create means that walk never has to ask Drive's
+        // (eventually-consistent) search index about a folder we already
+        // know the real id of — it reads this cache entry instead.
+        this.cachePut(parentId, part, id, FOLDER_MIME)
+        parentId = id
       }
     }
     return parentId
@@ -458,19 +544,18 @@ class DriveAdapter {
     const parentId = await this.findOrCreateFolderPath(bucketId, key)
     const fileName = key.split('/').pop()!
 
-    const existing = await this.drive.files.list({
-      q: `'${parentId}' in parents and name = '${this.escapeName(fileName)}' and trashed = false`,
-      fields: 'files(id)',
-      pageSize: 1,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    })
-
+    // Same read-after-write lag findOrCreateFolderPath's cache addresses:
+    // a file created moments ago by a previous request into this same
+    // just-created folder might not yet be visible to this files.list query.
+    // A cache hit here means "we (this process) know this file exists and
+    // where" — skip straight to the update branch instead of risking a
+    // false "doesn't exist" and creating a duplicate.
+    const cachedFile = this.cacheGet(parentId, fileName)
     let fileId: string
     const mime = contentType || 'application/octet-stream'
 
-    if (existing.data.files && existing.data.files.length > 0) {
-      fileId = existing.data.files[0].id!
+    if (cachedFile && cachedFile.mimeType !== FOLDER_MIME) {
+      fileId = cachedFile.id
       await this.drive.files.update({
         fileId,
         media: { body: stream, mimeType: mime },
@@ -478,13 +563,31 @@ class DriveAdapter {
         supportsAllDrives: true,
       })
     } else {
-      const created = await this.drive.files.create({
-        requestBody: { name: fileName, parents: [parentId] },
-        media: { body: stream, mimeType: mime },
-        fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+      const existing = await this.drive.files.list({
+        q: `'${parentId}' in parents and name = '${this.escapeName(fileName)}' and trashed = false`,
+        fields: 'files(id)',
+        pageSize: 1,
         supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       })
-      fileId = created.data.id!
+
+      if (existing.data.files && existing.data.files.length > 0) {
+        fileId = existing.data.files[0].id!
+        await this.drive.files.update({
+          fileId,
+          media: { body: stream, mimeType: mime },
+          fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+          supportsAllDrives: true,
+        })
+      } else {
+        const created = await this.drive.files.create({
+          requestBody: { name: fileName, parents: [parentId] },
+          media: { body: stream, mimeType: mime },
+          fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
+          supportsAllDrives: true,
+        })
+        fileId = created.data.id!
+      }
     }
 
     const meta = await this.drive.files.get({
@@ -492,6 +595,14 @@ class DriveAdapter {
       fields: 'id, name, size, modifiedTime, md5Checksum, mimeType',
       supportsAllDrives: true,
     })
+
+    // This is the other half of the fix: the leaf file itself is now cached
+    // too, not just the folder chain above it. A separate follow-up request
+    // (rclone's own post-upload HeadObject, or a fresh GET) that walks this
+    // exact path via walkPath reads this entry instead of asking Drive's
+    // files.list search index about a file we just wrote — the index is
+    // exactly what lagged in the live "object not found" failure.
+    this.cachePut(parentId, fileName, fileId, meta.data.mimeType || mime)
 
     return {
       key,
@@ -556,6 +667,12 @@ class DriveAdapter {
         })
       )
     )
+    // Evict any stale id the cache might still be holding under this same
+    // parent+name (e.g. from a previous write) before installing the new
+    // one below — otherwise a racing lookup could still be handed a trashed
+    // id even though we just cleaned it up.
+    staleIds.forEach((id) => this.cacheEvictById(id))
+    this.cachePut(destParentId, destName, copied.data.id!, copied.data.mimeType || 'application/octet-stream')
 
     return {
       key: destKey,
@@ -594,6 +711,7 @@ class DriveAdapter {
         requestBody: { trashed: true },
         supportsAllDrives: true,
       })
+      this.cacheEvictById(folderId)
       // Cascade the same way the file-delete branch below does — an
       // explicit `DELETE a/b/c/` on an already-empty `c` should also clean
       // up `b`/`a` if they're now empty too, not just `c` itself.
@@ -618,6 +736,7 @@ class DriveAdapter {
       requestBody: { trashed: true },
       supportsAllDrives: true,
     })
+    this.cacheEvictById(file.id!)
 
     // Auto-clean now-empty ancestor folders with the same trash convention —
     // deleting the last file in a folder shouldn't leave that folder (and
