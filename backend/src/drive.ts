@@ -286,13 +286,75 @@ class DriveAdapter {
     return parentId
   }
 
-  async listObjects(bucketName: string, prefix = '', delimiter = '/'): Promise<{ objects: DriveObject[]; prefixes: string[] }> {
+  /** Recursively descends every live subfolder under `folderId`, collecting
+   * every file (never folders) as a DriveObject with its full key relative
+   * to the bucket root. Used for delimiter-less (flat/recursive) listings —
+   * the S3 default when a client omits `delimiter` entirely, which is what
+   * `rclone lsjson -R` / `rclone check` / `aws s3 ls --recursive` send. */
+  private async collectObjectsRecursive(
+    folderId: string,
+    keyPrefix: string,
+    out: DriveObject[]
+  ): Promise<void> {
+    const files = await this.listLiveChildren(
+      folderId,
+      'files(id, name, mimeType, size, modifiedTime, md5Checksum)',
+      1000
+    )
+    for (const file of files) {
+      const key = keyPrefix ? `${keyPrefix}${file.name}` : file.name!
+      if (file.mimeType === FOLDER_MIME) {
+        await this.collectObjectsRecursive(file.id!, `${key}/`, out)
+      } else {
+        out.push({
+          key,
+          name: file.name!,
+          size: file.size || '0',
+          lastModified: file.modifiedTime || undefined,
+          etag: file.md5Checksum || file.id!,
+          contentType: file.mimeType || 'application/octet-stream',
+          isFolder: false,
+        })
+      }
+    }
+  }
+
+  /** `delimiter` follows real S3 semantics: `'/'` (the conventional value,
+   * also the default when a client omits the param on a "browse one level"
+   * call) groups subfolders into `CommonPrefixes` and does not descend into
+   * them. Anything else — including an explicitly empty string, and actual
+   * omission by the caller — means "no delimiter": a flat, fully recursive
+   * listing with every file's full key and no CommonPrefixes at all, which
+   * is what a real S3 client sends for a recursive listing. Previously this
+   * method silently ignored its own `delimiter` parameter (the router never
+   * even forwarded the client's query value) and always did the one-level
+   * walk, so any file more than one folder below `prefix` was invisible to
+   * every listing call even though HeadObject/GetObject on its exact key
+   * worked fine. */
+  async listObjects(
+    bucketName: string,
+    prefix = '',
+    delimiter?: string
+  ): Promise<{ objects: DriveObject[]; prefixes: string[] }> {
     const bucketId = await this.ensureBucket(bucketName)
     const prefixParts = prefix.split('/').filter(Boolean)
     const parentId =
       prefixParts.length === 0 ? bucketId : await this.walkPath(bucketId, prefixParts, 'folder')
     if (!parentId) {
       return { objects: [], prefixes: [] }
+    }
+
+    // S3 clients (rclone included) conventionally pass a trailing slash on
+    // `prefix` when listing a "directory" — naively appending another '/'
+    // here produced double-slash keys (e.g. "foo//bar.txt") on every such
+    // listing. Only insert the separator when prefix doesn't already end
+    // with one.
+    const prefixJoin = prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix
+
+    if (delimiter !== '/') {
+      const objects: DriveObject[] = []
+      await this.collectObjectsRecursive(parentId, prefixJoin, objects)
+      return { objects, prefixes: [] }
     }
 
     const files = await this.listLiveChildren(
@@ -304,12 +366,6 @@ class DriveAdapter {
     const objects: DriveObject[] = []
     const prefixes = new Set<string>()
 
-    // S3 clients (rclone included) conventionally pass a trailing slash on
-    // `prefix` when listing a "directory" — naively appending another '/'
-    // here produced double-slash keys (e.g. "foo//bar.txt") on every such
-    // listing. Only insert the separator when prefix doesn't already end
-    // with one.
-    const prefixJoin = prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix
     for (const file of files) {
       const isFolder = file.mimeType === FOLDER_MIME
       const key = prefixJoin ? `${prefixJoin}${file.name}` : file.name!
