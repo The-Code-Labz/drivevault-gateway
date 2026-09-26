@@ -33,7 +33,8 @@ router.post('/buckets/:name', requireApiKey, async (req: Request, res: Response)
 router.get('/buckets/:bucket/objects', async (req: Request, res: Response) => {
   try {
     const prefix = (req.query.prefix as string) || ''
-    const result = await driveAdapter.listObjects(req.params.bucket, prefix)
+    // Folder-browser UI: always one level deep, never a flat recursive dump.
+    const result = await driveAdapter.listObjects(req.params.bucket, prefix, '/')
     res.json(result)
   } catch (err) {
     console.error('Failed to list objects:', err)

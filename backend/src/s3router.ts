@@ -104,8 +104,13 @@ router.get('/', async (_req: Request, res: Response) => {
 router.get('/:bucket', async (req: Request, res: Response) => {
   const { bucket } = req.params
   const prefix = (req.query.prefix as string) || ''
+  // Forward the client's actual delimiter. AWS SDK/rclone omit this param
+  // entirely for a flat/recursive listing (undefined here) and send '/' for
+  // a one-level "directory browse" — the two cases must NOT collapse to the
+  // same behavior, or deep files silently vanish from recursive listings.
+  const delimiter = req.query.delimiter as string | undefined
   try {
-    const { objects, prefixes } = await driveAdapter.listObjects(bucket, prefix)
+    const { objects, prefixes } = await driveAdapter.listObjects(bucket, prefix, delimiter)
     res.set('Content-Type', 'application/xml')
     res.send(buildListObjectsXml(bucket, objects, prefixes, prefix))
   } catch (err) {
