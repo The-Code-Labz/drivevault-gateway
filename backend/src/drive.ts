@@ -29,7 +29,15 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder'
  * level `sync` into a brand-new nested path failed its first attempt with
  * "object not found" and self-healed on rclone's automatic retry a moment
  * later — exactly this window, and it can hit either an intermediate folder
- * segment or the leaf file itself. */
+ * segment or the leaf file itself.
+ *
+ * Scope: this only bridges "this process already wrote it, a later request
+ * in the same process can't see it yet" visibility lag. It does NOT fix a
+ * genuinely concurrent first write — two requests racing to create the SAME
+ * brand-new key can still both pass their files.list check-then-act with
+ * neither seeing the other's in-flight create, producing two Drive files
+ * with the same name. That's a pre-existing gap, unrelated to and not
+ * addressed by this cache. */
 interface CachedNode {
   id: string
   mimeType: string
@@ -43,11 +51,16 @@ class DriveAdapter {
   // Keyed by `${parentId}::${name}`. Populated exclusively right after a
   // files.list hit or a files.create/files.update call, so an entry here is
   // always known-good at insert time. Short TTL bounds staleness if the tree
-  // ever changes by some path other than this adapter (there isn't one
-  // today, but the TTL costs nothing and removes the need to prove that will
-  // stay true). Entries are evicted immediately on trash/delete (see
-  // cacheEvictById) so a removed node is never handed back from cache as
-  // still-live.
+  // ever changes by some path other than this adapter — there isn't one
+  // today because driveAdapter is a single process-wide singleton and this
+  // ships single-container (no replica config, one shared instance across
+  // s3router/webRouter/oauthRouter). If this gateway is ever horizontally
+  // scaled (N>1 replicas behind a load balancer), that assumption breaks:
+  // instance A trashing a file only evicts *its own* cache, so instance B
+  // can serve a stale hit for up to NODE_CACHE_TTL_MS after the file is
+  // already gone. Entries are evicted immediately on trash/delete within
+  // THIS process (see cacheEvictById) so a removed node is never handed
+  // back from cache as still-live — but only within this process.
   private nodeCache = new Map<string, CachedNode>()
   private static readonly NODE_CACHE_TTL_MS = 10_000
 
