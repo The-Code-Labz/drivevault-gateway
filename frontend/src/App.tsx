@@ -260,10 +260,29 @@ function Home() {
     e.preventDefault()
     dragDepth.current = 0
     setIsDragging(false)
-    if (!selectedBucket || !e.dataTransfer.items || e.dataTransfer.items.length === 0) return
+    if (!e.dataTransfer.items || e.dataTransfer.items.length === 0) return
+    if (!selectedBucket) {
+      setError('Open a bucket before dragging files in — drops land in whichever bucket/folder is currently open.')
+      return
+    }
     const pending = await flattenDataTransferItems(e.dataTransfer.items)
     handleFilesSelected(pending)
   }
+
+  // Safety net: without this, dropping a file anywhere the React handlers
+  // below don't cover (e.g. outside the root div's box, or if a future
+  // layout change leaves a gap) falls through to the browser's native
+  // "navigate to this file" behavior instead of silently doing nothing —
+  // which is exactly what made this look broken rather than just inert.
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault()
+    window.addEventListener('dragover', prevent)
+    window.addEventListener('drop', prevent)
+    return () => {
+      window.removeEventListener('dragover', prevent)
+      window.removeEventListener('drop', prevent)
+    }
+  }, [])
 
   const handleDelete = async (key: string) => {
     if (!selectedBucket) return
@@ -277,7 +296,22 @@ function Home() {
   }
 
   return (
-    <div className="min-h-screen p-6">
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="relative min-h-screen p-6"
+    >
+      {isDragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 border-4 border-dashed border-blue-500 bg-gray-950/80">
+          <UploadCloud size={48} className="text-blue-400" />
+          <p className="text-sm font-medium text-blue-300">
+            {selectedBucket ? 'Drop files or folders to upload' : 'Open a bucket first to drop files here'}
+          </p>
+        </div>
+      )}
+
       <header className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <HardDrive className="text-blue-500" size={32} />
@@ -350,21 +384,10 @@ function Home() {
         </div>
       ) : (
         <div
-          onDragEnter={handleDragEnter}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={`relative rounded-xl border p-6 transition-colors ${
+          className={`rounded-xl border p-6 transition-colors ${
             isDragging ? 'border-blue-500 bg-blue-950/20' : 'border-gray-800 bg-gray-900/50'
           }`}
         >
-          {isDragging && (
-            <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-blue-500 bg-gray-950/80">
-              <UploadCloud size={40} className="text-blue-400" />
-              <p className="text-sm font-medium text-blue-300">Drop files or folders to upload</p>
-            </div>
-          )}
-
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <button onClick={() => { setSelectedBucket(null); setPrefix('') }} className="text-sm text-blue-400 hover:underline">← Back to buckets</button>
