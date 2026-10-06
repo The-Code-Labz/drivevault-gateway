@@ -1,0 +1,30 @@
+name: Auto Tag
+
+# Bumps a semver tag on every push to main (incl. PR merges) and pushes it
+# using RELEASE_PAT instead of the default GITHUB_TOKEN. Tags pushed with
+# GITHUB_TOKEN don't re-trigger other workflows (GitHub's loop-prevention
+# rule) — publish.yml listens for `push: tags: v*.*.*`, so a real PAT is
+# required here for that handoff to actually fire the image build.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        uses: anothrNick/github-tag-action@1.71.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
+          WITH_V: true
+          DEFAULT_BUMP: patch
+          RELEASE_BRANCHES: main
