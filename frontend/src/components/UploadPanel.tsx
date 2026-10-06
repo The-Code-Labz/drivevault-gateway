@@ -44,23 +44,26 @@ export default function UploadPanel({
         : `${done} upload${done === 1 ? '' : 's'} complete`
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 overflow-hidden rounded-xl border border-gray-800 bg-gray-900 shadow-2xl">
-      <div className="flex items-center justify-between bg-gray-950 px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          {active > 0 && <Loader2 size={14} className="animate-spin text-blue-400" />}
+    <div className="fixed bottom-4 right-4 z-50 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-lg sm:bottom-4 sm:right-4 max-sm:bottom-3 max-sm:left-3 max-sm:right-3 max-sm:w-auto">
+      {/* Screen readers get a throttled summary instead of per-percent noise. */}
+      <span className="sr-only" role="status" aria-live="polite">{headline}</span>
+
+      <div className="flex items-center justify-between bg-bg px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-medium tnum">
+          {active > 0 && <Loader2 size={14} className="animate-spin text-primary motion-reduce:animate-none" />}
           {headline}
         </span>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+            className="rounded p-1 text-gray-400 hover:bg-surface-raised hover:text-white"
             title={collapsed ? 'Expand' : 'Collapse'}
           >
             {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
           <button
             onClick={onDismissAll}
-            className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+            className="rounded p-1 text-gray-400 hover:bg-surface-raised hover:text-white"
             title="Dismiss all"
           >
             <X size={16} />
@@ -69,7 +72,7 @@ export default function UploadPanel({
       </div>
 
       {!collapsed && (
-        <ul className="max-h-72 overflow-y-auto divide-y divide-gray-800">
+        <ul className="max-h-72 overflow-y-auto divide-y divide-border">
           {tasks.map((t) => {
             const pct = t.size > 0 ? Math.min(100, Math.round((t.loaded / t.size) * 100)) : t.status === 'done' ? 100 : 0
             return (
@@ -78,20 +81,23 @@ export default function UploadPanel({
                 <div className="min-w-0 flex-1">
                   <div className="truncate" title={t.relativePath}>{t.relativePath}</div>
                   {t.status === 'uploading' || t.status === 'queued' ? (
-                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-gray-800">
-                      <div className="h-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-border">
+                      <div
+                        className="h-full origin-left bg-primary transition-transform duration-150 motion-reduce:transition-none"
+                        style={{ transform: `scaleX(${pct / 100})`, width: '100%' }}
+                      />
                     </div>
                   ) : t.status === 'error' ? (
-                    <div className="truncate text-xs text-red-400" title={t.error}>{t.error || 'Upload failed'}</div>
+                    <div className="truncate text-xs text-danger" title={t.error}>{t.error || 'Upload failed'}</div>
                   ) : (
-                    <div className="text-xs text-gray-500">{formatBytes(t.size)}</div>
+                    <div className="tnum text-xs text-gray-500">{formatBytes(t.size)}</div>
                   )}
                 </div>
                 <div className="shrink-0">
-                  {t.status === 'done' && <CheckCircle2 size={16} className="text-green-500" />}
-                  {t.status === 'error' && <XCircle size={16} className="text-red-500" />}
+                  {t.status === 'done' && <CheckCircle2 size={16} className="text-success" />}
+                  {t.status === 'error' && <XCircle size={16} className="text-danger" />}
                   {(t.status === 'queued' || t.status === 'uploading') && (
-                    <button onClick={() => onCancel(t.id)} className="rounded p-0.5 text-gray-500 hover:bg-gray-800 hover:text-white" title="Cancel">
+                    <button onClick={() => onCancel(t.id)} className="rounded p-0.5 text-gray-500 hover:bg-surface-raised hover:text-white" title="Cancel">
                       <X size={14} />
                     </button>
                   )}
