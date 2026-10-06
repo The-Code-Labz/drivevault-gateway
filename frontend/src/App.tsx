@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import {
   listBuckets,
   createBucket,
   listObjects,
   deleteObject,
-  uploadObject,
   getObjectUrl,
   getApiKey,
   setApiKey,
@@ -13,10 +12,14 @@ import {
   getOAuthConnectUrl,
 } from './api'
 import type { Bucket, DriveObject, OAuthStatus } from './types'
+import { useUploadQueue } from './hooks/useUploadQueue'
+import { flattenDataTransferItems, flattenFileList, type PendingFile } from './lib/fileTraversal'
+import { getFileIcon } from './lib/fileIcon'
+import UploadPanel from './components/UploadPanel'
 import {
   HardDrive,
   Folder,
-  File,
+  FolderUp,
   Trash2,
   Upload,
   RefreshCw,
@@ -27,6 +30,8 @@ import {
   LogIn,
   CheckCircle2,
   XCircle,
+  UploadCloud,
+  Inbox,
 } from 'lucide-react'
 
 const OAUTH_POLL_MS = 5000
@@ -157,6 +162,20 @@ function Home() {
   const [error, setError] = useState('')
   const [newBucketName, setNewBucketName] = useState('')
   const [showNewBucket, setShowNewBucket] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
+
+  // Refs mirror the "currently viewed" bucket/prefix so a background
+  // upload's completion callback always refreshes whatever the user is
+  // actually looking at right now, not whatever was open when the upload
+  // started (they may well have navigated to a different folder by then).
+  const selectedBucketRef = useRef(selectedBucket)
+  const prefixRef = useRef(prefix)
+  useEffect(() => { selectedBucketRef.current = selectedBucket }, [selectedBucket])
+  useEffect(() => { prefixRef.current = prefix }, [prefix])
 
   const loadBuckets = async () => {
     setLoading(true)
@@ -195,6 +214,10 @@ function Home() {
     }
   }, [selectedBucket, prefix])
 
+  const { tasks, enqueue, cancelTask, dismissAll } = useUploadQueue(() => {
+    if (selectedBucketRef.current) loadObjects(selectedBucketRef.current, prefixRef.current)
+  })
+
   const handleCreateBucket = async () => {
     if (!newBucketName.trim()) return
     try {
@@ -207,22 +230,39 @@ function Home() {
     }
   }
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedBucket || !e.target.files || e.target.files.length === 0) return
-    setLoading(true)
-    setError('')
-    try {
-      for (const file of Array.from(e.target.files)) {
-        const key = prefix ? `${prefix}${file.name}` : file.name
-        await uploadObject(selectedBucket, key, file)
-      }
-      await loadObjects(selectedBucket, prefix)
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message)
-    } finally {
-      setLoading(false)
-      e.target.value = ''
-    }
+  const handleFilesSelected = (pending: PendingFile[]) => {
+    if (!selectedBucket || pending.length === 0) return
+    enqueue(selectedBucket, prefix, pending)
+  }
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) handleFilesSelected(flattenFileList(e.target.files))
+    e.target.value = ''
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragDepth.current++
+    setIsDragging(true)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setIsDragging(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    dragDepth.current = 0
+    setIsDragging(false)
+    if (!selectedBucket || !e.dataTransfer.items || e.dataTransfer.items.length === 0) return
+    const pending = await flattenDataTransferItems(e.dataTransfer.items)
+    handleFilesSelected(pending)
   }
 
   const handleDelete = async (key: string) => {
@@ -296,7 +336,7 @@ function Home() {
                 <button
                   key={b.id}
                   onClick={() => setSelectedBucket(b.name)}
-                  className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 p-4 text-left hover:border-blue-600"
+                  className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-600 hover:shadow-lg"
                 >
                   <Folder className="text-yellow-500" />
                   <div>
@@ -309,7 +349,22 @@ function Home() {
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
+        <div
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative rounded-xl border p-6 transition-colors ${
+            isDragging ? 'border-blue-500 bg-blue-950/20' : 'border-gray-800 bg-gray-900/50'
+          }`}
+        >
+          {isDragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-blue-500 bg-gray-950/80">
+              <UploadCloud size={40} className="text-blue-400" />
+              <p className="text-sm font-medium text-blue-300">Drop files or folders to upload</p>
+            </div>
+          )}
+
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <button onClick={() => { setSelectedBucket(null); setPrefix('') }} className="text-sm text-blue-400 hover:underline">← Back to buckets</button>
@@ -317,10 +372,27 @@ function Home() {
               <Breadcrumb prefix={prefix} onNavigate={setPrefix} />
             </div>
             <div className="flex items-center gap-2">
-              <label className="flex cursor-pointer items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
-                <Upload size={16} /> Upload
-                <input type="file" multiple className="hidden" onChange={handleUpload} />
-              </label>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500"
+              >
+                <Upload size={16} /> Upload files
+              </button>
+              <button
+                onClick={() => folderInputRef.current?.click()}
+                className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700"
+              >
+                <FolderUp size={16} /> Upload folder
+              </button>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileInputChange}
+                {...({ webkitdirectory: 'true', directory: 'true' } as any)}
+              />
               <button onClick={() => loadObjects(selectedBucket, prefix)} className="rounded bg-gray-800 p-2 hover:bg-gray-700">
                 <RefreshCw size={16} />
               </button>
@@ -353,11 +425,13 @@ function Home() {
                       <td className="px-4 py-3 text-right">—</td>
                     </tr>
                   ))}
-                  {objects.map((o) => (
-                    <tr key={o.key} className="hover:bg-gray-900">
+                  {objects.map((o) => {
+                    const { icon: Icon, className } = getFileIcon(o.name)
+                    return (
+                    <tr key={o.key} className="transition-colors hover:bg-gray-900">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <File size={16} className="text-gray-500" />
+                          <Icon size={16} className={className} />
                           <span>{o.name}</span>
                         </div>
                       </td>
@@ -378,10 +452,16 @@ function Home() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                   {prefixes.length === 0 && objects.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500">This bucket is empty.</td>
+                      <td colSpan={4} className="px-4 py-10 text-center text-gray-500">
+                        <div className="flex flex-col items-center gap-2">
+                          <Inbox size={28} className="text-gray-600" />
+                          <span>This folder is empty. Drag files or folders here to upload.</span>
+                        </div>
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -390,6 +470,8 @@ function Home() {
           )}
         </div>
       )}
+
+      <UploadPanel tasks={tasks} onCancel={cancelTask} onDismissAll={dismissAll} />
     </div>
   )
 }

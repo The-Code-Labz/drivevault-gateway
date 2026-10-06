@@ -56,12 +56,26 @@ export async function listObjects(bucket: string, prefix = ''): Promise<ListObje
 }
 
 export async function deleteObject(bucket: string, key: string): Promise<void> {
-  await api.delete(`/api/buckets/${encodeURIComponent(bucket)}/objects/${encodeURIComponent(key)}`)
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  await api.delete(`/api/buckets/${encodeURIComponent(bucket)}/objects/${encodedKey}`)
 }
 
-export async function uploadObject(bucket: string, key: string, file: File): Promise<void> {
-  await api.put(`/s3/${encodeURIComponent(bucket)}/${encodeURIComponent(key)}`, file, {
+export async function uploadObject(
+  bucket: string,
+  key: string,
+  file: File,
+  opts?: { onProgress?: (loaded: number, total: number) => void; signal?: AbortSignal }
+): Promise<void> {
+  // Encode each path segment separately — encodeURIComponent would also
+  // escape the '/' separators in a nested key (folder uploads), breaking
+  // the path the backend expects.
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  await api.put(`/s3/${encodeURIComponent(bucket)}/${encodedKey}`, file, {
     headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    signal: opts?.signal,
+    onUploadProgress: (evt) => {
+      opts?.onProgress?.(evt.loaded, evt.total ?? file.size)
+    },
   })
 }
 
@@ -69,7 +83,8 @@ export function getObjectUrl(bucket: string, key: string): string {
   const key_ = getApiKey()
   const qs = new URLSearchParams({ download: 'true' })
   if (key_) qs.set('key', key_)
-  return `${baseURL || ''}/s3/${encodeURIComponent(bucket)}/${encodeURIComponent(key)}?${qs.toString()}`
+  const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+  return `${baseURL || ''}/s3/${encodeURIComponent(bucket)}/${encodedKey}?${qs.toString()}`
 }
 
 export async function getOAuthStatus(): Promise<OAuthStatus> {
