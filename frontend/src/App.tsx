@@ -28,8 +28,6 @@ import {
   ChevronRight,
   KeyRound,
   LogIn,
-  CheckCircle2,
-  XCircle,
   UploadCloud,
   Inbox,
 } from 'lucide-react'
@@ -51,10 +49,10 @@ function ApiKeyControl({ onChange }: { onChange: () => void }) {
     return (
       <button
         onClick={() => { setValue(getApiKey()); setEditing(true) }}
-        className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700"
+        className="btn-secondary"
         title={hasKey ? 'API key is set — click to change' : 'No API key set — click to set one'}
       >
-        <KeyRound size={16} className={hasKey ? 'text-green-500' : 'text-gray-500'} />
+        <KeyRound size={16} className={hasKey ? 'text-success' : 'text-neutral'} />
         {hasKey ? 'API key set' : 'Set API key'}
       </button>
     )
@@ -68,14 +66,14 @@ function ApiKeyControl({ onChange }: { onChange: () => void }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="x-api-key"
-        className="w-48 rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm"
+        className="input w-48"
         onKeyDown={(e) => {
           if (e.key === 'Enter') save()
           if (e.key === 'Escape') setEditing(false)
         }}
       />
-      <button onClick={save} className="rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">Save</button>
-      <button onClick={() => setEditing(false)} className="rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700">Cancel</button>
+      <button onClick={save} className="btn-primary">Save</button>
+      <button onClick={() => setEditing(false)} className="btn-secondary">Cancel</button>
     </div>
   )
 }
@@ -106,19 +104,16 @@ function OAuthConnectControl() {
 
   return (
     <div className="flex items-center gap-2">
-      {status.connected ? (
-        <span className="flex items-center gap-1 rounded bg-green-900/30 px-2 py-2 text-xs text-green-300">
-          <CheckCircle2 size={14} /> Google Drive connected
-        </span>
-      ) : (
-        <span className="flex items-center gap-1 rounded bg-red-900/30 px-2 py-2 text-xs text-red-300">
-          <XCircle size={14} /> Not connected
-        </span>
-      )}
-      <button
-        onClick={handleConnect}
-        className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500"
+      {/* "Not connected" is a normal, expected state before first setup —
+          it stays neutral gray, not red, so it doesn't read as an error. */}
+      <span
+        className={`badge ${status.connected ? 'bg-success-bg text-success' : 'bg-neutral-bg text-neutral'}`}
+        role="status"
       >
+        <span className={`badge-dot ${status.connected ? 'bg-success' : 'bg-neutral'}`} />
+        {status.connected ? 'Google Drive connected' : 'Not connected'}
+      </span>
+      <button onClick={handleConnect} className="btn-primary">
         <LogIn size={16} /> {status.connected ? 'Reconnect' : 'Connect Google Drive'}
       </button>
     </div>
@@ -137,18 +132,25 @@ function formatBytes(n?: string) {
 function Breadcrumb({ prefix, onNavigate }: { prefix: string; onNavigate: (p: string) => void }) {
   const parts = prefix.split('/').filter(Boolean)
   return (
-    <div className="flex items-center gap-2 text-sm text-gray-400">
-      <button onClick={() => onNavigate('')} className="hover:text-white">Home</button>
+    <nav aria-label="Current path" className="flex items-center gap-2 text-sm text-gray-400">
+      <button onClick={() => onNavigate('')} className="rounded hover:text-white">Home</button>
       {parts.map((part, idx) => {
         const path = parts.slice(0, idx + 1).join('/') + '/'
+        const isLast = idx === parts.length - 1
         return (
           <div key={path} className="flex items-center gap-2">
             <ChevronRight size={14} />
-            <button onClick={() => onNavigate(path)} className="hover:text-white">{part}</button>
+            <button
+              onClick={() => onNavigate(path)}
+              aria-current={isLast ? 'location' : undefined}
+              className={`rounded hover:text-white ${isLast ? 'font-medium text-gray-200' : ''}`}
+            >
+              {part}
+            </button>
           </div>
         )
       })}
-    </div>
+    </nav>
   )
 }
 
@@ -304,43 +306,49 @@ function Home() {
       className="relative min-h-screen p-6"
     >
       {isDragging && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 border-4 border-dashed border-blue-500 bg-gray-950/80">
-          <UploadCloud size={48} className="text-blue-400" />
-          <p className="text-sm font-medium text-blue-300">
-            {selectedBucket ? 'Drop files or folders to upload' : 'Open a bucket first to drop files here'}
-          </p>
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm motion-reduce:backdrop-blur-none">
+          <div className="flex min-h-[220px] w-[min(420px,calc(100vw-32px))] flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-primary bg-surface p-8 text-center shadow-lg">
+            <UploadCloud size={40} className="text-primary" />
+            <p className="text-sm font-semibold text-gray-100">
+              {selectedBucket ? 'Drop files to upload' : 'Open a bucket first'}
+            </p>
+            <p className="text-xs text-gray-400">
+              {selectedBucket
+                ? `Destination: ${selectedBucket}/${prefix || ''}`
+                : 'Drops land in whichever bucket is currently open.'}
+            </p>
+          </div>
         </div>
       )}
 
       <header className="mb-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <HardDrive className="text-blue-500" size={32} />
+          <HardDrive className="text-primary" size={32} />
           <div>
-            <h1 className="text-2xl font-bold">DriveVault Gateway</h1>
+            <h1 className="text-2xl font-bold tracking-tight">DriveVault Gateway</h1>
             <p className="text-sm text-gray-400">Google Drive exposed as S3-compatible object storage</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OAuthConnectControl />
           <ApiKeyControl onChange={loadBuckets} />
-          <button onClick={loadBuckets} className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 hover:bg-gray-700">
+          <button onClick={loadBuckets} className="btn-secondary">
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
       </header>
 
       {error && (
-        <div className="mb-4 rounded border border-red-800 bg-red-900/30 p-3 text-red-200">{error}</div>
+        <div role="alert" className="mb-4 rounded-md border border-danger/40 bg-danger-bg p-3 text-sm text-red-200">
+          {error}
+        </div>
       )}
 
       {!selectedBucket ? (
-        <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
+        <div className="rounded-xl border border-border bg-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Buckets</h2>
-            <button
-              onClick={() => setShowNewBucket(true)}
-              className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500"
-            >
+            <button onClick={() => setShowNewBucket(true)} className="btn-primary">
               <Plus size={16} /> New bucket
             </button>
           </div>
@@ -349,33 +357,44 @@ function Home() {
             <div className="mb-4 flex gap-2">
               <input
                 type="text"
+                autoFocus
                 value={newBucketName}
                 onChange={(e) => setNewBucketName(e.target.value)}
                 placeholder="bucket-name"
-                className="flex-1 rounded border border-gray-700 bg-gray-950 px-3 py-2"
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateBucket()}
+                className="input flex-1"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateBucket()
+                  if (e.key === 'Escape') setShowNewBucket(false)
+                }}
               />
-              <button onClick={handleCreateBucket} className="rounded bg-blue-600 px-4 py-2 hover:bg-blue-500">Create</button>
-              <button onClick={() => setShowNewBucket(false)} className="rounded bg-gray-800 px-4 py-2 hover:bg-gray-700">Cancel</button>
+              <button onClick={handleCreateBucket} className="btn-primary">Create</button>
+              <button onClick={() => setShowNewBucket(false)} className="btn-secondary">Cancel</button>
             </div>
           )}
 
           {loading ? (
-            <p className="text-gray-400">Loading...</p>
+            <div className="space-y-2" aria-live="polite" aria-busy="true">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-surface-raised motion-reduce:animate-none" />
+              ))}
+            </div>
           ) : buckets.length === 0 ? (
-            <p className="text-gray-400">No buckets yet. Create one to get started.</p>
+            <div className="flex flex-col items-center gap-2 py-10 text-center">
+              <HardDrive size={32} className="text-gray-600" />
+              <p className="text-gray-400">No buckets yet. Create one to get started.</p>
+            </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {buckets.map((b) => (
                 <button
                   key={b.id}
                   onClick={() => setSelectedBucket(b.name)}
-                  className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-900 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-600 hover:shadow-lg"
+                  className="flex items-center gap-3 rounded-lg border border-border bg-surface-raised p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-md motion-reduce:hover:translate-y-0"
                 >
                   <Folder className="text-yellow-500" />
                   <div>
                     <div className="font-medium">{b.name}</div>
-                    <div className="text-xs text-gray-500">{b.createdTime ? new Date(b.createdTime).toLocaleDateString() : '—'}</div>
+                    <div className="tnum text-xs text-gray-500">{b.createdTime ? new Date(b.createdTime).toLocaleDateString() : '—'}</div>
                   </div>
                 </button>
               ))}
@@ -385,26 +404,25 @@ function Home() {
       ) : (
         <div
           className={`rounded-xl border p-6 transition-colors ${
-            isDragging ? 'border-blue-500 bg-blue-950/20' : 'border-gray-800 bg-gray-900/50'
+            isDragging ? 'border-primary bg-primary-subtle' : 'border-border bg-surface'
           }`}
         >
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <button onClick={() => { setSelectedBucket(null); setPrefix('') }} className="text-sm text-blue-400 hover:underline">← Back to buckets</button>
+              <button
+                onClick={() => { setSelectedBucket(null); setPrefix('') }}
+                className="text-sm text-primary hover:underline"
+              >
+                ← Back to buckets
+              </button>
               <h2 className="mt-1 text-lg font-semibold">{selectedBucket}</h2>
               <Breadcrumb prefix={prefix} onNavigate={setPrefix} />
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500"
-              >
+              <button onClick={() => fileInputRef.current?.click()} className="btn-primary">
                 <Upload size={16} /> Upload files
               </button>
-              <button
-                onClick={() => folderInputRef.current?.click()}
-                className="flex items-center gap-2 rounded bg-gray-800 px-3 py-2 text-sm hover:bg-gray-700"
-              >
+              <button onClick={() => folderInputRef.current?.click()} className="btn-secondary">
                 <FolderUp size={16} /> Upload folder
               </button>
               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInputChange} />
@@ -416,60 +434,71 @@ function Home() {
                 onChange={handleFileInputChange}
                 {...({ webkitdirectory: 'true', directory: 'true' } as any)}
               />
-              <button onClick={() => loadObjects(selectedBucket, prefix)} className="rounded bg-gray-800 p-2 hover:bg-gray-700">
+              <button onClick={() => loadObjects(selectedBucket, prefix)} className="btn-ghost" title="Refresh objects">
                 <RefreshCw size={16} />
               </button>
             </div>
           </div>
 
           {loading ? (
-            <p className="text-gray-400">Loading...</p>
+            <div className="overflow-hidden rounded-lg border border-border" aria-live="polite" aria-busy="true">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex h-[52px] items-center gap-3 border-b border-border px-4 last:border-b-0">
+                  <div className="h-4 w-4 animate-pulse rounded bg-surface-raised motion-reduce:animate-none" />
+                  <div className="h-3 w-48 animate-pulse rounded bg-surface-raised motion-reduce:animate-none" />
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-800">
+            <div className="overflow-hidden rounded-lg border border-border">
               <table className="w-full text-left text-sm">
-                <thead className="bg-gray-950">
+                <thead className="bg-bg">
                   <tr>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Size</th>
-                    <th className="px-4 py-3">Modified</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-3 font-medium text-gray-400">Name</th>
+                    <th className="px-4 py-3 font-medium text-gray-400">Size</th>
+                    <th className="px-4 py-3 font-medium text-gray-400">Modified</th>
+                    <th className="px-4 py-3 text-right font-medium text-gray-400">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-800">
+                <tbody className="divide-y divide-border">
                   {prefixes.map((p) => (
-                    <tr key={p} className="hover:bg-gray-900">
+                    <tr key={p} className="hover:bg-surface-raised">
                       <td className="px-4 py-3">
-                        <button onClick={() => setPrefix(p)} className="flex items-center gap-2 text-blue-400 hover:underline">
+                        <button onClick={() => setPrefix(p)} className="flex items-center gap-2 text-primary hover:underline">
                           <Folder size={16} className="text-yellow-500" /> {p.slice(prefix.length).replace(/\/$/, '')}
                         </button>
                       </td>
-                      <td className="px-4 py-3">—</td>
-                      <td className="px-4 py-3">—</td>
-                      <td className="px-4 py-3 text-right">—</td>
+                      <td className="px-4 py-3 text-gray-500">—</td>
+                      <td className="px-4 py-3 text-gray-500">—</td>
+                      <td className="px-4 py-3 text-right text-gray-500">—</td>
                     </tr>
                   ))}
                   {objects.map((o) => {
                     const { icon: Icon, className } = getFileIcon(o.name)
                     return (
-                    <tr key={o.key} className="transition-colors hover:bg-gray-900">
+                    <tr key={o.key} className="transition-colors hover:bg-surface-raised">
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Icon size={16} className={className} />
-                          <span>{o.name}</span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Icon size={16} className={`shrink-0 ${className}`} />
+                          <span className="truncate" title={o.name}>{o.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3">{formatBytes(o.size)}</td>
-                      <td className="px-4 py-3">{o.lastModified ? new Date(o.lastModified).toLocaleString() : '—'}</td>
+                      <td className="tnum px-4 py-3">{formatBytes(o.size)}</td>
+                      <td className="tnum px-4 py-3">{o.lastModified ? new Date(o.lastModified).toLocaleString() : '—'}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-2">
                           <a
                             href={getObjectUrl(selectedBucket, o.key)}
-                            className="rounded bg-gray-800 p-2 hover:bg-gray-700"
-                            title="Download"
+                            className="btn-ghost"
+                            title={`Download ${o.name}`}
                           >
                             <Download size={16} />
                           </a>
-                          <button onClick={() => handleDelete(o.key)} className="rounded bg-red-900/40 p-2 text-red-300 hover:bg-red-900/60" title="Delete">
+                          <button
+                            onClick={() => handleDelete(o.key)}
+                            className="btn-destructive"
+                            title={`Delete ${o.name}`}
+                          >
                             <Trash2 size={16} />
                           </button>
                         </div>
@@ -479,10 +508,11 @@ function Home() {
                   })}
                   {prefixes.length === 0 && objects.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-10 text-center text-gray-500">
+                      <td colSpan={4} className="px-4 py-14 text-center text-gray-500">
                         <div className="flex flex-col items-center gap-2">
                           <Inbox size={28} className="text-gray-600" />
-                          <span>This folder is empty. Drag files or folders here to upload.</span>
+                          <span>This folder is empty.</span>
+                          <span className="text-xs text-gray-600">Drop files anywhere on this page, or choose files above.</span>
                         </div>
                       </td>
                     </tr>
